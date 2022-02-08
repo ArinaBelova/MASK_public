@@ -61,17 +61,28 @@ if __name__ == "__main__":
     # find a class and instantiate
     class_ = getattr(inpor, algorithm)
     instance = class_()
+    # For BERT we need to have masks as well as data and labels 
+    # if instance.__class__.__name__ == "NER_BERT":
+    #     # attention masks
+    #     # tain_test of input_ids and tags
+    #     # train_test of attention_masks
+    #     pass
+    # else:
     X,Y = instance.transform_sequences(tokens_labels)
     if args.do_test == "yes":
         X_train,X_test, Y_train,Y_test = train_test_split(X,Y,test_size=0.2,random_state=42)
-
+        print("DATA!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        print(X_train)
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        print("LABELS!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        print(Y_train)
         instance.learn(X_train,Y_train,int(args.epochs))
         #instance.save(args.algorithm)
 
         instance.evaluate(X_test,Y_test)
     else:
         instance.learn(X, Y)
-
+    # Define save() method for each instance class
     if args.save_model=='yes':
         instance.save(args.algorithm)
 
