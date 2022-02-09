@@ -25,9 +25,8 @@ from tqdm import tqdm, trange
 import numpy as np
 import matplotlib.pyplot as plt
 
-from GPUtil import showUtilization as gpu_usage
-
 class NER_BERT(object):
+    device = torch.device("cpu")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     n_gpu = torch.cuda.device_count()
 
@@ -37,11 +36,17 @@ class NER_BERT(object):
     tokenizer = BertTokenizer.from_pretrained('bert-base-cased', num_labels=len(tag2idx), do_lower_case=False)
 
     MAX_LEN = 75
-    bs = 5
+    bs = 32
 
     """Abstract class that other NER plugins should implement"""
     def __init__(self):
-        pass
+        self.model = BertForTokenClassification.from_pretrained(
+            "bert-base-cased",
+            num_labels=len(NER_BERT.tag2idx),
+            output_attentions = False,
+            output_hidden_states = True
+        )     
+        self.model.cuda()
 
     def perform_NER(self,text):
         """Implementation of the method that should perform named entity recognition"""
@@ -67,8 +72,6 @@ class NER_BERT(object):
     def transform_sequences(self,tokens_labels):
         """method that transforms sequences of (token,label) into feature sequences. Returns two sequence lists for X and Y"""
         print("I am in transform seq")
-        # documents = read_i2b2_data(path)
-        # Get those: tokens_labels = utils.spec_tokenizers.tokenize_to_seq(documents), docments - datafiles
         # result - one document, result[i] is sentence in document, result [i][i] is word in sentence
         tokenized_sentences = []
         labels = []
@@ -113,22 +116,13 @@ class NER_BERT(object):
 
         print("READY TO PREPARE OPTIMIZER!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
-        model = BertForTokenClassification.from_pretrained(
-            "bert-base-cased",
-            num_labels=len(NER_BERT.tag2idx),
-            output_attentions = False,
-            output_hidden_states = True
-        )
-        
-        model.cuda()
-
         # #bilstm = nn.LSTM()
 
         # #model.classifier = 
 
         FULL_FINETUNING = True
         if FULL_FINETUNING:
-            param_optimizer = list(model.named_parameters())
+            param_optimizer = list(self.model.named_parameters())
             no_decay = ['bias', 'gamma', 'beta']
             optimizer_grouped_parameters = [
                 {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)],
@@ -137,7 +131,7 @@ class NER_BERT(object):
                 'weight_decay_rate': 0.0}
             ]
         else:
-            param_optimizer = list(model.classifier.named_parameters())
+            param_optimizer = list(self.model.classifier.named_parameters())
             optimizer_grouped_parameters = [{"params": [p for n, p in param_optimizer]}]
 
         optimizer = AdamW(
@@ -166,12 +160,11 @@ class NER_BERT(object):
             # ========================================
             #               Training
             # ========================================
-            # Perform one full pass over the training set.
-            gpu_usage()            
+            # Perform one full pass over the training set.        
             # clean the cache not to fail with video memory
             torch.cuda.empty_cache()
             # Put the model into training mode.
-            model.train()
+            self.model.train()
             # Reset the total loss for this epoch.
             total_loss = 0
 
@@ -181,11 +174,11 @@ class NER_BERT(object):
                 batch = tuple(b.to(NER_BERT.device) for b in batch)
                 b_input_ids, b_input_mask, b_labels = batch
                 # Always clear any previously calculated gradients before performing a backward pass.
-                model.zero_grad()
+                self.model.zero_grad()
                 # forward pass
                 # This will return the loss (rather than the model output)
                 # because we have provided the `labels`.
-                outputs = model(b_input_ids, token_type_ids=None,
+                outputs = self.model(b_input_ids, token_type_ids=None,
                                 attention_mask=b_input_mask, labels=b_labels)
                 # get the loss
                 loss = outputs[0]
@@ -195,7 +188,7 @@ class NER_BERT(object):
                 total_loss += loss.item()
                 # Clip the norm of the gradient
                 # This is to help prevent the "exploding gradients" problem.
-                torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=max_grad_norm)
+                torch.nn.utils.clip_grad_norm_(parameters=self.model.parameters(), max_norm=max_grad_norm)
                 # update parameters
                 optimizer.step()
                 # Update the learning rate.
@@ -237,7 +230,7 @@ class NER_BERT(object):
         #     # After the completion of each training epoch, measure our performance on
         #     # our validation set.
 
-        #     # Put the model into evaluation mode
+        #     # Put the model into evaluation mode to set dropout and batch normalization layers to evaluation mode to have consistent results
         #     model.eval()
         #     # Reset the validation loss for this epoch.
         #     eval_loss, eval_accuracy = 0, 0
@@ -301,3 +294,13 @@ class NER_BERT(object):
 
         # plt.show()
         pass
+
+    def save(self, model_path):
+        """
+        Function to save model. Models are saved as h5 files in Models directory. Name is passed as argument
+        :param model_path: Name of the model file
+        :return: Doesn't return anything
+        """
+        self.model.save("Models/"+model_path+".h5")
+        print("Saved model to disk")
+
