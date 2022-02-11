@@ -93,11 +93,6 @@ class NER_BERT(object):
                             maxlen=NER_BERT.MAX_LEN, value=NER_BERT.tag2idx["PAD"], padding="post",
                             dtype="long", truncating="post")  
 
-        # tr_inputs, val_inputs, tr_tags, val_tags = train_test_split(input_ids, tags,
-        #                                                             random_state=2018, test_size=0.1)
-        # tr_masks, val_masks, _, _ = train_test_split(attention_masks, input_ids,
-        #                                             random_state=2018, test_size=0.1)
-
         # Result is pair X (array of sentences, where each sentence is an array of words) and Y (array of labels)
         return input_ids, tags
 
@@ -116,7 +111,7 @@ class NER_BERT(object):
 
         print("READY TO PREPARE OPTIMIZER!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
-        # #bilstm = nn.LSTM()
+        # #bilstm = nn.LSTM() # try to change the classification head (last layer) to BiLSTM?
 
         # #model.classifier = 
 
@@ -216,64 +211,55 @@ class NER_BERT(object):
     def evaluate(self, X_test,Y_test):
         """Function to evaluate algorithm"""
         val_masks = [[float(i != 0.0) for i in ii] for ii in X_test]
-        # val_inputs = torch.tensor(val_inputs)
-        # val_tags = torch.tensor(val_tags)
-        # val_masks = torch.tensor(val_masks)
+        val_inputs = torch.tensor(X_test)
+        val_tags = torch.tensor(Y_test)
+        val_masks = torch.tensor(val_masks)
 
-        # valid_data = TensorDataset(val_inputs, val_masks, val_tags)
-        # valid_sampler = SequentialSampler(valid_data)
-        # valid_dataloader = DataLoader(valid_data, sampler=valid_sampler, batch_size=bs)
+        valid_data = TensorDataset(val_inputs, val_masks, val_tags)
+        valid_sampler = SequentialSampler(valid_data)
+        valid_dataloader = DataLoader(valid_data, sampler=valid_sampler, batch_size=bs)
 
-        #     # ========================================
-        #     #               Validation
-        #     # ========================================
-        #     # After the completion of each training epoch, measure our performance on
-        #     # our validation set.
+        # ========================================
+        #               Validation
+        # ========================================
+        # After the completion of each training epoch, measure our performance on
+        # our validation set.
 
-        #     # Put the model into evaluation mode to set dropout and batch normalization layers to evaluation mode to have consistent results
-        #     model.eval()
-        #     # Reset the validation loss for this epoch.
-        #     eval_loss, eval_accuracy = 0, 0
-        #     nb_eval_steps, nb_eval_examples = 0, 0
-        #     predictions , true_labels = [], []
-        #     for batch in valid_dataloader:
-        #         batch = tuple(t.to(device) for t in batch)
-        #         b_input_ids, b_input_mask, b_labels = batch
+        # Put the model into evaluation mode to set dropout and batch normalization layers to evaluation mode to have consistent results
+        self.model.eval()
+        # Reset the validation loss for this epoch.
+        eval_loss, eval_accuracy = 0, 0
+        nb_eval_steps, nb_eval_examples = 0, 0
+        predictions , true_labels = [], []
+        for batch in valid_dataloader:
+            batch = tuple(t.to(self.device) for t in batch)
+            b_input_ids, b_input_mask, b_labels = batch
 
-        #         # Telling the model not to compute or store gradients,
-        #         # saving memory and speeding up validation
-        #         with torch.no_grad():
-        #             # Forward pass, calculate logit predictions.
-        #             # This will return the logits rather than the loss because we have not provided labels.
-        #             outputs = model(b_input_ids, token_type_ids=None,
-        #                             attention_mask=b_input_mask, labels=b_labels)
-        #         # Move logits and labels to CPU
-        #         logits = outputs[1].detach().cpu().numpy()
-        #         label_ids = b_labels.to('cpu').numpy()
+            # Telling the model not to compute or store gradients,
+            # saving memory and speeding up validation
+            with torch.no_grad():
+                # Forward pass, calculate logit predictions.
+                # This will return the logits rather than the loss because we have not provided labels.
+                outputs = self.model(b_input_ids, token_type_ids=None,
+                                attention_mask=b_input_mask, labels=b_labels)
+            # Move logits and labels to CPU
+            logits = outputs[1].detach().cpu().numpy()
+            label_ids = b_labels.to('cpu').numpy()
 
-        #         # Calculate the accuracy for this batch of test sentences.
-        #         eval_loss += outputs[0].mean().item()
-        #         predictions.extend([list(p) for p in np.argmax(logits, axis=2)])
-        #         true_labels.extend(label_ids)
+            # Calculate the accuracy for this batch of test sentences.
+            eval_loss += outputs[0].mean().item()
+            predictions.extend([list(p) for p in np.argmax(logits, axis=2)])
+            true_labels.extend(label_ids)
 
-        #     eval_loss = eval_loss / len(valid_dataloader)
-        #     validation_loss_values.append(eval_loss)
-        #     print("Validation loss: {}".format(eval_loss))
-        #     f.writelines("Validation loss: {}".format(eval_loss))
-        #     pred_tags = [NER_BERT.tag_values[p_i] for p, l in zip(predictions, true_labels)
-        #                                 for p_i, l_i in zip(p, l) if NER_BERT.tag_values[l_i] != "PAD"]
-        #     valid_tags = [NER_BERT.tag_values[l_i] for l in true_labels
-        #                                 for l_i in l if NER_BERT.tag_values[l_i] != "PAD"]
-        #     print("Validation Accuracy: {}".format(accuracy_score(pred_tags, valid_tags)))
-        #     f.writelines("Validation Accuracy: {}".format(accuracy_score(pred_tags, valid_tags)))
-        #     #print("Validation F1-Score: {}".format(f1_score(pred_tags, valid_tags)))
-        #     print()
-
-        # f.writelines("Training loss values are {}".format(loss_values))    
-        # f.writelines("Validation loss values are {}".format(validation_loss_values))
-        # f.close()
-
-
+        eval_loss = eval_loss / len(valid_dataloader)
+        print("Validation loss: {}".format(eval_loss))
+        pred_tags = [NER_BERT.tag_values[p_i] for p, l in zip(predictions, true_labels)
+                                    for p_i, l_i in zip(p, l) if NER_BERT.tag_values[l_i] != "PAD"]
+        valid_tags = [NER_BERT.tag_values[l_i] for l in true_labels
+                                    for l_i in l if NER_BERT.tag_values[l_i] != "PAD"]
+        print("Validation Accuracy: {}".format(accuracy_score(pred_tags, valid_tags)))
+        print("Validation F1-Score: {}".format(f1_score(pred_tags, valid_tags)))
+        print()
 
         # # Use plot styling from seaborn.
         # sns.set(style='darkgrid')
@@ -293,7 +279,6 @@ class NER_BERT(object):
         # plt.legend()
 
         # plt.show()
-        pass
 
     def save(self, model_path):
         """
