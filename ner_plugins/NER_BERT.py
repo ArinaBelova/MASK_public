@@ -217,7 +217,7 @@ class NER_BERT(object):
 
         valid_data = TensorDataset(val_inputs, val_masks, val_tags)
         valid_sampler = SequentialSampler(valid_data)
-        valid_dataloader = DataLoader(valid_data, sampler=valid_sampler, batch_size=bs)
+        valid_dataloader = DataLoader(valid_data, sampler=valid_sampler, batch_size=NER_BERT.bs)
 
         # ========================================
         #               Validation
@@ -286,6 +286,6 @@ class NER_BERT(object):
         :param model_path: Name of the model file
         :return: Doesn't return anything
         """
-        self.model.save("Models/"+model_path+".h5")
+        torch.save(self.model.state_dict(), "Models/"+model_path+".pt")
         print("Saved model to disk")
 
