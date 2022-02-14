@@ -17,7 +17,8 @@ from transformers import BertForTokenClassification, AdamW
 
 from transformers import get_linear_schedule_with_warmup
 
-from seqeval.metrics import f1_score, accuracy_score
+from seqeval.metrics import accuracy_score, classification_report
+from sklearn.metrics import f1_score
 
 import torch.nn as nn 
 
@@ -258,7 +259,8 @@ class NER_BERT(object):
         valid_tags = [NER_BERT.tag_values[l_i] for l in true_labels
                                     for l_i in l if NER_BERT.tag_values[l_i] != "PAD"]
         print("Validation Accuracy: {}".format(accuracy_score(pred_tags, valid_tags)))
-        print("Validation F1-Score: {}".format(f1_score(pred_tags, valid_tags)))
+        print("Validation F1-Score: {}".format(f1_score(valid_tags, pred_tags, average='weighted')))
+        print(classification_report(valid_tags, pred_tags, digits=4))
         print()
 
         # # Use plot styling from seaborn.
