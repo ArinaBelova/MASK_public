@@ -287,7 +287,7 @@ class NER_CRF(NER_abstract):
         labels.remove('O')
         Y_pred_flat  = [item for sublist in Y_pred for item in sublist]
         Y_flat = [item for sublist in Y for item in sublist]
-        print(metrics.classification_report(Y_pred_flat, Y_flat,labels))
+        print(metrics.classification_report(Y_pred_flat, Y_flat,labels=labels))
 
     def perform_NER(self,text):
         """

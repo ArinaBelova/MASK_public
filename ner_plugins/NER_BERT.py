@@ -26,6 +26,8 @@ from tqdm import tqdm, trange
 import numpy as np
 import matplotlib.pyplot as plt
 
+import os
+
 class NER_BERT(object):
     device = torch.device("cpu")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -47,14 +49,57 @@ class NER_BERT(object):
             output_attentions = False,
             output_hidden_states = True
         )     
-        self.model.cuda()
+        if os.path.exists("Models/NER_BERT.pt"):
+            print("Loading model") 
+            self.model.load_state_dict(torch.load("Models/NER_BERT.pt"))
+            print("Loaded model")
 
     def perform_NER(self,text):
         """Implementation of the method that should perform named entity recognition"""
-        pass
+        # tokenizer to divide data into sentences (thanks, nltk)
+        tok = nltk.data.load('tokenizers/punkt/english.pickle')
+        list_of_sents = tok.tokenize(text) # list of sentences
+        temp_t = []
 
-    def createModel(self, text=None):
-        pass
+        for sent in list_of_sents:
+          sent = sent.replace('\n', ' ')
+          sent = sent.replace('\t', '')
+          temp_t.append(sent)
+
+        list_of_sents = temp_t
+
+        list_of_tuples_by_sent = []
+
+        for sent in list_of_sents:
+            tokenized_sentence = self.tokenizer.encode(sent,truncation=True)
+            input_ids = torch.tensor([tokenized_sentence])
+
+            with torch.no_grad():
+                output = self.model(input_ids)
+            label_indices = np.argmax(output[0].to("cpu").numpy(), axis=2)
+            tokens = self.tokenizer.convert_ids_to_tokens(input_ids.to('cpu').numpy()[0])
+            new_tokens, new_labels = [], []
+            for token, label_idx in zip(tokens, label_indices[0]):
+                if token.startswith("##"):
+                    new_tokens[-1] = new_tokens[-1] + token[2:]
+                else:
+                    new_labels.append(self.tag_values[label_idx])
+                    new_tokens.append(token)
+
+            list_of_tuples = []
+            for token, label in zip(new_tokens, new_labels):
+                list_of_tuples.append((token, label))
+                #print("{}\t{}".format(label, token))
+            list_of_tuples_by_sent.append(list_of_tuples)
+
+        # remove [CLS] and [SEP] tokens to comply wth xml structure
+        for i in range(len(list_of_tuples_by_sent)):
+            if ('[CLS]', 'O') in list_of_tuples_by_sent[i]:
+                list_of_tuples_by_sent[i].remove(('[CLS]', 'O'))
+            if ('[SEP]', 'O') in list_of_tuples_by_sent[i]:    
+                list_of_tuples_by_sent[i].remove(('[SEP]', 'O'))
+
+        return list_of_tuples_by_sent              
 
     # Needed for transform_sequences
     def tokenize_and_preserve_labels(self, sentence, text_labels):
@@ -99,6 +144,9 @@ class NER_BERT(object):
 
     def learn(self, X_train,Y_train, epochs=1):
         """Function that actually train the algorithm"""
+        if torch.cuda.is_available():
+            self.model.cuda()
+        
         tr_masks = [[float(i != 0.0) for i in ii] for ii in X_train]
 
         print("READY TO CREATE SOME TENZORS!!!!!!!!!!!!!!!!!!!!!!!!!!")
@@ -158,7 +206,8 @@ class NER_BERT(object):
             # ========================================
             # Perform one full pass over the training set.        
             # clean the cache not to fail with video memory
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             # Put the model into training mode.
             self.model.train()
             # Reset the total loss for this epoch.
