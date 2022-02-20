@@ -87,7 +87,14 @@ def consolidate_NER_results(final_sequences, text):
             label = final_sequences[i][j][1]
             span_min = spans[multiplier+j][0]
             span_max = spans[multiplier+j][1]
-            fin.append((token, label, span_min, span_max))
+            # Maybe not the most elegant soluion to BERT tokenisation issue, when punctuation 
+            # signs are considered to be labels.
+            if (token == "/" or token == "," or token == "-" or token == "\\") and label == "DATE":
+                label = "O"
+            # Similar issue happens with NAME
+            if (token == "," or token == ".") and label == "NAME":
+                label = "O"     
+            fin.append((token, label, span_min, span_max))       
     return fin
 
 def recalculate_tokens(token_array, index, token_size, replacement_size, new_text, new_token):

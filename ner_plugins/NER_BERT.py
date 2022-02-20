@@ -26,20 +26,21 @@ from tqdm import tqdm, trange
 import numpy as np
 import matplotlib.pyplot as plt
 
+from nltk.tokenize import sent_tokenize
+
 import os
 
 class NER_BERT(object):
     device = torch.device("cpu")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    n_gpu = torch.cuda.device_count()
 
     tag2idx = {'O':0, 'ID':1, 'PHI':2, 'NAME':3, 'CONTACT':4, 'DATE':5, 'AGE':6, 'PROFESSION':7, 'LOCATION':8, 'PAD': 9}
     tag_values = ["O","ID", "PHI", "NAME", "CONTACT", "DATE", "AGE", "PROFESSION", "LOCATION", "PAD"]
 
     tokenizer = BertTokenizer.from_pretrained('bert-base-cased', num_labels=len(tag2idx), do_lower_case=False)
 
-    MAX_LEN = 75
-    bs = 32
+    MAX_LEN = 75 # max length of sequence, needs for padding
+    bs = 32 # batch size
 
     """Abstract class that other NER plugins should implement"""
     def __init__(self):
@@ -57,24 +58,17 @@ class NER_BERT(object):
     def perform_NER(self,text):
         """Implementation of the method that should perform named entity recognition"""
         # tokenizer to divide data into sentences (thanks, nltk)
-        tok = nltk.data.load('tokenizers/punkt/english.pickle')
-        list_of_sents = tok.tokenize(text) # list of sentences
-        temp_t = []
 
-        for sent in list_of_sents:
-          sent = sent.replace('\n', ' ')
-          sent = sent.replace('\t', '')
-          temp_t.append(sent)
-
-        list_of_sents = temp_t
+        list_of_sents = sent_tokenize(text)
 
         list_of_tuples_by_sent = []
 
         for sent in list_of_sents:
-            tokenized_sentence = self.tokenizer.encode(sent,truncation=True)
+            tokenized_sentence = self.tokenizer.encode(sent, truncation=True)
             input_ids = torch.tensor([tokenized_sentence])
 
             with torch.no_grad():
+                # Run inference/classification
                 output = self.model(input_ids)
             label_indices = np.argmax(output[0].to("cpu").numpy(), axis=2)
             tokens = self.tokenizer.convert_ids_to_tokens(input_ids.to('cpu').numpy()[0])
@@ -94,10 +88,21 @@ class NER_BERT(object):
 
         # remove [CLS] and [SEP] tokens to comply wth xml structure
         for i in range(len(list_of_tuples_by_sent)):
-            if ('[CLS]', 'O') in list_of_tuples_by_sent[i]:
-                list_of_tuples_by_sent[i].remove(('[CLS]', 'O'))
-            if ('[SEP]', 'O') in list_of_tuples_by_sent[i]:    
-                list_of_tuples_by_sent[i].remove(('[SEP]', 'O'))
+            # list_of_tuples_by_sent[i] = filter(lambda x: x[0] != '[CLS]' or x[0] != '[SEP]', list_of_tuples_by_sent[i])
+            # print(list_of_tuples_by_sent[i])
+            for tag in self.tag_values:
+                if ('[CLS]', tag) in list_of_tuples_by_sent[i]:
+                    list_of_tuples_by_sent[i].remove(('[CLS]', tag))
+            
+                if ('[SEP]', tag) in list_of_tuples_by_sent[i]:    
+                    list_of_tuples_by_sent[i].remove(('[SEP]', tag))
+            # for j in range(len(list_of_tuples_by_sent[i])):
+            #     if '[CLS]' == list_of_tuples_by_sent[i][j][0]:
+            #         list_of_tuples_by_sent[i].remove(list_of_tuples_by_sent[i][j])
+            #         #list_of_tuples_by_sent[i].remove(('[CLS]', 'O'))
+            #     if '[SEP]' == list_of_tuples_by_sent[i][j][0]:    
+            #         #list_of_tuples_by_sent[i].remove(('[SEP]', 'O'))
+            #         list_of_tuples_by_sent[i].remove(list_of_tuples_by_sent[i][j])
 
         return list_of_tuples_by_sent              
 
