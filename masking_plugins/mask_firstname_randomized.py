@@ -21,7 +21,7 @@ from masking_plugins.Mask_abstract import Mask_abstract
 from Dictionaries.populate import first_names
 
 
-class MaskFirstNameRandomized(Mask_abstract):
+class mask_firstname_randomized(Mask_abstract):
     """This class replace the first name with randomized name from the dictionary"""
     def __init__(self):
         self.replacements = {}

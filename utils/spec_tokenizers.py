@@ -27,7 +27,7 @@ sess = tf.compat.v1.Session()
 _treebank_word_tokenizer = TreebankWordTokenizer()
 
 
-def tokenize_to_seq(documents):
+def tokenize_to_seq(documents): # in the end you will get a big list of concatenated documents, no division between individual documents anymore.
     sequences = []
     sequence = []
     for doc in documents:
@@ -124,9 +124,9 @@ def custom_word_tokenize(text, language='english', preserve_line=False):
     :type preserver_line: bool
     """
     tokens = []
-    sentences = [text] if preserve_line else nltk.sent_tokenize(text, language)
+    sentences = [text] if preserve_line else nltk.sent_tokenize(text, language) # splits the text into list of sentences.
     for sent in sentences:
-        for token in _treebank_word_tokenizer.tokenize(sent):
+        for token in _treebank_word_tokenizer.tokenize(sent): # TreeBankWordTokezier returns their tokenized version of those words in sentences in a list. So output is list of words/tokens.
             if "-" in token:
                 m = re.compile("(\d+)(-)([a-zA-z-]+)")
                 g = m.match(token)
@@ -138,6 +138,7 @@ def custom_word_tokenize(text, language='english', preserve_line=False):
             else:
                 tokens.append(token)
     return tokens
+
 def shape(self,word):
     shape = ""
     for letter in word:

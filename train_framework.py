@@ -21,6 +21,7 @@ limitations under the License.
 
 import argparse
 import importlib
+from tkinter.messagebox import YESNO
 
 from sklearn.model_selection import train_test_split
 
@@ -37,7 +38,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Training framework for Named Entity recognition')
     parser.add_argument('--source_type', help = 'source type of the dataset (available values: i2b2)')
     parser.add_argument('--source_location', help='source location of the dataset on your hard disk')
-    parser.add_argument('--do_test', help='source location of the dataset on your hard disk')
+    parser.add_argument('--do_test', help='boolean: whether to do testing of trained model or not')
     parser.add_argument('--save_model',help='Whether to save the model on HDD in Models folder, with algorithm name')
     parser.add_argument('--algorithm', help='algorithm to use')
     parser.add_argument('--epochs',help='number of epochs or iteration to train')
@@ -49,10 +50,6 @@ if __name__ == "__main__":
     if documents== None:
         print("Error: No input source is defined")
         exit(2)
-    # if "bert" in args.algorithm.lower():
-    #     tokens_labels = utils.spec_tokenizers.tokenize_bert(documents)
-    #     pass
-    #else:
 
     tokens_labels = utils.spec_tokenizers.tokenize_to_seq(documents)
     package = "ner_plugins."+ args.algorithm
@@ -61,21 +58,13 @@ if __name__ == "__main__":
     # find a class and instantiate
     class_ = getattr(inpor, algorithm)
     instance = class_()
-    # For BERT we need to have masks as well as data and labels 
-    # if instance.__class__.__name__ == "NER_BERT":
-    #     # attention masks
-    #     # tain_test of input_ids and tags
-    #     # train_test of attention_masks
-    #     pass
-    # else:
+
     X,Y = instance.transform_sequences(tokens_labels)
+    print("LENGTH OF DATA")
+    print(len(X)) #22926
+    
     if args.do_test == "yes":
         X_train,X_test, Y_train,Y_test = train_test_split(X,Y,test_size=0.2,random_state=42)
-        print("DATA!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        print(X_train)
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        print("LABELS!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        print(Y_train)
         instance.learn(X_train,Y_train,int(args.epochs))
         #instance.save(args.algorithm)
 
