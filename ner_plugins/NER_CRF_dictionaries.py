@@ -31,7 +31,8 @@ class NER_CRF_dictionaries(NER_abstract):
 
     """
     def __init__(self):
-        filename = 'Models/crf_dict_model.sav'
+        print("I AM IN CRF")
+        filename = 'Models/NER_CRF_dictionaries1.sav'
         self.crf_model = sklearn_crfsuite.CRF(
             algorithm='lbfgs',
             c1=0.1,
@@ -39,7 +40,7 @@ class NER_CRF_dictionaries(NER_abstract):
             max_iterations=200,
             all_possible_transitions=True
         )
-        self._treebank_word_tokenizer = TreebankWordTokenizer()
+
         country_file = open("Dictionaries/Countries.txt",'r', encoding='utf-8')
         self.dictionary_country = country_file.readlines()
         self.dictionary_country = set([line[:-1] for line in self.dictionary_country])
@@ -69,7 +70,6 @@ class NER_CRF_dictionaries(NER_abstract):
                         if len(can)>2:
                             self.dictionary_job_titles.append(can)
         self.dictionary_job_titles = set(self.dictionary_job_titles)
-        pass
 
     def shape(self,word):
         shape = ""
@@ -326,9 +326,6 @@ class NER_CRF_dictionaries(NER_abstract):
             y_train.append(labels_seq)
         return X_train,y_train
 
-
-
-
     def learn(self,X,Y,epochs =1):
         """
         Function for training CRF algorithm
@@ -395,10 +392,39 @@ class NER_CRF_dictionaries(NER_abstract):
             X_test.append(features_seq)
             word_sequences.append(sentence)
         y_pred = self.crf_model.predict(X_test)
-        final_sequences = []
-        for i in range(0,len(y_pred)):
+
+        # New formatting of the output supporting combination of algorithms.        
+        final_sequences, fin_tokenized_sentence, fin_labels = [], [], []
+
+        for word_sequence, label in zip(word_sequences, y_pred):
+            tokenized_sentence = []
+            labels = []
+            for word, l in zip(word_sequence, label):
+                # Tokenize the word and count # of subwords the word is broken into
+                tokenized_word = re.split("([\W | _])", word) # the most fucking clever regexpr in my life
+                tokenized_word = [t  for t in tokenized_word if t != ""]
+                n_subwords = len(tokenized_word)
+                # Add the tokenized word to the final tokenized word list
+                tokenized_sentence.extend(tokenized_word)
+                # Add the same label to the new list of labels `n_subwords` times
+                labels.extend([l] * n_subwords)
+            fin_tokenized_sentence.append(tokenized_sentence)
+            fin_labels.append(labels)
+
+        for i in range(0,len(fin_labels)):
             sentence = []
-            for j in range(0,len(y_pred[i])):
-                sentence.append((word_sequences[i][j],y_pred[i][j]))
+            for j in range(0,len(fin_labels[i])):
+                sentence.append((fin_tokenized_sentence[i][j],fin_labels[i][j]))
+
             final_sequences.append(sentence)
-        return final_sequences
+
+        return final_sequences    
+
+        # Old code for formatting the outputs. Is not supported in combination of algorithms.
+        # final_sequences = []
+        # for i in range(0,len(y_pred)):
+        #     sentence = []
+        #     for j in range(0,len(y_pred[i])):
+        #         sentence.append((word_sequences[i][j],y_pred[i][j]))
+        #     final_sequences.append(sentence)
+        # return final_sequences

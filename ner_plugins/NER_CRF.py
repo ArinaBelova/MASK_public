@@ -29,7 +29,7 @@ class NER_CRF(NER_abstract):
 
     """
     def __init__(self):
-        filename = 'Models/crf_baseline_model.sav'
+        filename = 'Models/NER_CRF1.sav'
         self.crf_model = sklearn_crfsuite.CRF(
             algorithm='lbfgs',
             c1=0.1,
@@ -58,6 +58,12 @@ class NER_CRF(NER_abstract):
             else:
                 shape = shape + letter
         return shape
+
+    #  To build a conditional random field, you just define a bunch of feature functions 
+    # (which can depend on the entire sentence, a current position, and nearby labels),
+    #  assign them weights, and add them all together,
+    #  transforming at the end to a probability if necessary.   
+    # This brilliant explanation is taken from: https://blog.echen.me/2012/01/03/introduction-to-conditional-random-fields/ 
 
     def word2features(self,sent, i):
         """
@@ -296,7 +302,7 @@ class NER_CRF(NER_abstract):
           :param text: text over which should be performed named entity recognition
           :type language: str
 
-          """
+          """  
         X_test = []
         documents = [text]
         sequences = tokenize_fa(documents)
@@ -313,9 +319,31 @@ class NER_CRF(NER_abstract):
             word_sequences.append(sentence)
         y_pred = self.crf_model.predict(X_test)
         final_sequences = []
-        for i in range(0,len(y_pred)):
+
+        import re
+
+        fin_tokenized_sentence, fin_labels = [], []
+
+        for word_sequence, label in zip(word_sequences, y_pred):
+            tokenized_sentence = []
+            labels = []
+            for word, l in zip(word_sequence, label):
+                # Tokenize the word and count # of subwords the word is broken into
+                tokenized_word = re.split("([\W | _])", word) # the most fucking clever regexpr in my life
+                tokenized_word = [t  for t in tokenized_word if t != ""]
+                n_subwords = len(tokenized_word)
+                # Add the tokenized word to the final tokenized word list
+                tokenized_sentence.extend(tokenized_word)
+                # Add the same label to the new list of labels `n_subwords` times
+                labels.extend([l] * n_subwords)
+            fin_tokenized_sentence.append(tokenized_sentence)
+            fin_labels.append(labels)
+
+        for i in range(0,len(fin_labels)):
             sentence = []
-            for j in range(0,len(y_pred[i])):
-                sentence.append((word_sequences[i][j],y_pred[i][j]))
+            for j in range(0,len(fin_labels[i])):
+                sentence.append((fin_tokenized_sentence[i][j],fin_labels[i][j]))
+
             final_sequences.append(sentence)
+
         return final_sequences

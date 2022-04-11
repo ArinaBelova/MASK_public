@@ -1,25 +1,22 @@
-from transformers import BertForTokenClassification
 import torch
-from transformers import BertTokenizer
 import numpy as np
 import nltk.data
 nltk.download('punkt')
 
 import torch
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
-from transformers import BertTokenizer, BertConfig, AutoModelForTokenClassification, AutoConfig
+
+import torch.nn as nn 
+
+from transformers import DistilBertTokenizer, DistilBertForTokenClassification, DistilBertConfig, AdamW
+from transformers import get_linear_schedule_with_warmup
 
 from keras.preprocessing.sequence import pad_sequences
 from sklearn.model_selection import train_test_split
 
-from transformers import BertForTokenClassification, AdamW
-
-from transformers import get_linear_schedule_with_warmup
-
 from seqeval.metrics import accuracy_score
 from sklearn.metrics import f1_score, classification_report
 
-import torch.nn as nn 
 
 from tqdm import trange
 import numpy as np
@@ -29,62 +26,37 @@ from nltk.tokenize import sent_tokenize
 
 import os
 
-class NER_BERT(object):
+class NER_DistilBERT(object):
     device = torch.device("cpu")
     #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     tag2idx = {'O':0, 'ID':1, 'PHI':2, 'NAME':3, 'CONTACT':4, 'DATE':5, 'AGE':6, 'PROFESSION':7, 'LOCATION':8, 'PAD': 9}
     tag_values = ["O","ID", "PHI", "NAME", "CONTACT", "DATE", "AGE", "PROFESSION", "LOCATION", "PAD"]
 
-    tokenizer = BertTokenizer.from_pretrained('bert-base-cased', num_labels=len(tag2idx), do_lower_case=False)
+    tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-cased', num_labels=len(tag2idx), do_lower_case=False)
 
     MAX_LEN = 75 # max length of sequence, needs for padding
     bs = 32 # batch size
 
     """Abstract class that other NER plugins should implement"""
     def __init__(self):
-        # print("I AM IN BERT!")
-        # print("Loading model") 
-        # state_dict = torch.load("Models_intermediate/BERT_epoch-4.pt")
-        # print("Loaded model")
-        # self.model = BertForTokenClassification.from_pretrained(
-        #     "bert-base-cased",
-        #     state_dict = state_dict,
-        #     num_labels=len(NER_BERT.tag2idx),
-        #     output_attentions = False,
-        #     output_hidden_states = True
-        # )
-        # print("Created model!")
-
-        # self.model = BertForTokenClassification.from_pretrained(
-        #     "bert-base-cased",
-        #     num_labels=len(NER_BERT.tag2idx),
-        #     output_attentions = False,
-        #     output_hidden_states = True
-        # )      
-
-        #config = AutoConfig.from_pretrained('ArishkaBelovishka/bert-i2b2')
-        #self.model = AutoModelForTokenClassification.from_pretrained('ArishkaBelovishka/bert-i2b2', config = config)
-
-        # Uncomment the following if you want to load your fine-tuned model from Models folder.
-        # If you just want to run NER use hugging-face repository where fine-tuned on half of i2b2 data model lives.
-
-        if os.path.exists("Models/NER_BERT.pt"):
+        if os.path.exists("Models/NER_DisitlBERT.pt"):
             print("Loading model") 
-            state_dict = torch.load("Models/NER_BERT.pt", map_location=torch.device('cpu'))
+            state_dict = torch.load("Models/NER_DisitlBERT.pt", map_location=torch.device('cpu'))
             print("Loaded model")
 
-            self.model = BertForTokenClassification.from_pretrained(
-                "bert-base-cased",
+            print("Loaded weigits of fine-tuned model into the model.")
+            self.model = DistilBertForTokenClassification.from_pretrained(
+                "distilbert-base-cased",
                 state_dict = state_dict,
-                num_labels=len(NER_BERT.tag2idx),
+                num_labels=len(NER_DistilBERT.tag2idx),
                 output_attentions = False,
                 output_hidden_states = True
             )
         else:
-            self.model = BertForTokenClassification.from_pretrained(
-                "bert-base-cased",
-                num_labels=len(NER_BERT.tag2idx),
+            self.model = DistilBertForTokenClassification.from_pretrained(
+                "distilbert-base-cased",
+                num_labels=len(NER_DistilBERT.tag2idx),
                 output_attentions = False,
                 output_hidden_states = True
             )            
@@ -99,8 +71,7 @@ class NER_BERT(object):
         list_of_tuples_by_sent = []
 
         for sent in list_of_sents:
-            tokenized_sentence = self.tokenizer.encode(sent, truncation=True) # BERT tokenizer is clever, it will internally divide the sentence by words, so all we need to provide there is sentence and it will return an array where each token is either special token/word/subword, refer to BERT WordPiece tokenizer approach
-            # truncation=True to comply with 512 length of the sentence
+            tokenized_sentence = self.tokenizer.encode(sent, truncation=True)
             input_ids = torch.tensor([tokenized_sentence])
 
             with torch.no_grad():
@@ -130,7 +101,7 @@ class NER_BERT(object):
             
                 if ('[SEP]', tag) in list_of_tuples_by_sent[i]:    
                     list_of_tuples_by_sent[i].remove(('[SEP]', tag))            
-                    
+
         return list_of_tuples_by_sent              
 
     # Needed for transform_sequences
@@ -139,7 +110,7 @@ class NER_BERT(object):
         labels = []
         for word, label in zip(sentence, text_labels):
             # Tokenize the word and count # of subwords the word is broken into
-            tokenized_word = NER_BERT.tokenizer.tokenize(word)
+            tokenized_word = NER_DistilBERT.tokenizer.tokenize(word)
             n_subwords = len(tokenized_word)
             # Add the tokenized word to the final tokenized word list
             tokenized_sentence.extend(tokenized_word)
@@ -154,6 +125,8 @@ class NER_BERT(object):
         tokenized_sentences = []
         labels = []
         for index, sentence in enumerate(tokens_labels):
+            if len(sentence) == 0:
+              continue
             text_labels = []
             sentence_to_feed = []
             for word_label in sentence:
@@ -163,12 +136,12 @@ class NER_BERT(object):
             tokenized_sentences.append(a)
             labels.append(b)
 
-        input_ids = pad_sequences([NER_BERT.tokenizer.convert_tokens_to_ids(txt) for txt in tokenized_sentences],
-                                maxlen=NER_BERT.MAX_LEN, dtype="long", value=0.0,
+        input_ids = pad_sequences([NER_DistilBERT.tokenizer.convert_tokens_to_ids(txt) for txt in tokenized_sentences],
+                                maxlen=NER_DistilBERT.MAX_LEN, dtype="long", value=0.0,
                                 truncating="post", padding="post")
 
-        tags = pad_sequences([[NER_BERT.tag2idx.get(l) for l in lab] for lab in labels],
-                            maxlen=NER_BERT.MAX_LEN, value=NER_BERT.tag2idx["PAD"], padding="post",
+        tags = pad_sequences([[NER_DistilBERT.tag2idx.get(l) for l in lab] for lab in labels],
+                            maxlen=NER_DistilBERT.MAX_LEN, value=NER_DistilBERT.tag2idx["PAD"], padding="post",
                             dtype="long", truncating="post")  
 
         # Result is pair X (array of sentences, where each sentence is an array of words) and Y (array of labels)
@@ -188,22 +161,17 @@ class NER_BERT(object):
    
         train_data = TensorDataset(tr_inputs, tr_masks, tr_tags)
         train_sampler = RandomSampler(train_data)
-        train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=NER_BERT.bs)
+        train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=NER_DistilBERT.bs)
 
         print("READY TO PREPARE OPTIMIZER!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
-
-        # Weight decay in Adam optimiser (adaptive gradient algorithm) is a regularisation technique which is extensively disucssed in this paper:
-        # https://arxiv.org/abs/1711.05101
-        # (Like L2 for SGD but different)
-        # resularisation of the model objective function in order to prevent overfitting of the model.
         FULL_FINETUNING = True
         if FULL_FINETUNING:
             param_optimizer = list(self.model.named_parameters())
             no_decay = ['bias', 'gamma', 'beta']
             optimizer_grouped_parameters = [
                 {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)],
-                'weight_decay_rate': 0.01}, # in AdamW implementation (default: 1e-2)
+                'weight_decay_rate': 0.01},
                 {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)],
                 'weight_decay_rate': 0.0}
             ]
@@ -235,7 +203,7 @@ class NER_BERT(object):
         loss_values, validation_loss_values = [], []
 
         # just for intermediate model save naming 
-        epoch_num = 3
+        epoch_num = 0
 
         for _ in trange(epochs, desc="Epoch"):
             # ========================================
@@ -261,14 +229,14 @@ class NER_BERT(object):
                 print("We are in the batch!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
                 # add batch to gpu
-                batch = tuple(b.to(NER_BERT.device) for b in batch)
+                batch = tuple(b.to(NER_DistilBERT.device) for b in batch)
                 b_input_ids, b_input_mask, b_labels = batch
                 # Always clear any previously calculated gradients before performing a backward pass.
                 self.model.zero_grad()
                 # forward pass
                 # This will return the loss (rather than the model output)
                 # because we have provided the `labels`.
-                outputs = self.model(b_input_ids, token_type_ids=None,
+                outputs = self.model(b_input_ids,
                                 attention_mask=b_input_mask, labels=b_labels)
                 # get the loss
                 loss = outputs[0]
@@ -297,7 +265,7 @@ class NER_BERT(object):
 
             # Save intermediate weights of the model, i.e. if computer goes crazy and drops the training or you 
             # want to test the performance from different epochs 
-            torch.save(self.model.state_dict(), os.path.join("Models_intermediate/", 'BERT_epoch-{}.pt'.format(epoch_num)))
+            torch.save(self.model.state_dict(), os.path.join("Models_intermediate/", 'DisitlBERT_epoch-{}.pt'.format(epoch_num)))
 
                 #Plot the learning curve.
         plt.figure()
@@ -319,7 +287,7 @@ class NER_BERT(object):
 
         valid_data = TensorDataset(val_inputs, val_masks, val_tags)
         valid_sampler = SequentialSampler(valid_data)
-        valid_dataloader = DataLoader(valid_data, sampler=valid_sampler, batch_size=NER_BERT.bs)
+        valid_dataloader = DataLoader(valid_data, sampler=valid_sampler, batch_size=NER_DistilBERT.bs)
 
         # ========================================
         #               Validation
@@ -342,7 +310,7 @@ class NER_BERT(object):
             with torch.no_grad():
                 # Forward pass, calculate logit predictions.
                 # This will return the logits rather than the loss because we have not provided labels.
-                outputs = self.model(b_input_ids, token_type_ids=None,
+                outputs = self.model(b_input_ids,
                                 attention_mask=b_input_mask, labels=b_labels)
             # Move logits and labels to CPU
             logits = outputs[1].detach().cpu().numpy()
@@ -355,10 +323,10 @@ class NER_BERT(object):
 
         eval_loss = eval_loss / len(valid_dataloader)
         print("Validation loss: {}".format(eval_loss))
-        pred_tags = [NER_BERT.tag_values[p_i] for p, l in zip(predictions, true_labels)
-                                    for p_i, l_i in zip(p, l) if NER_BERT.tag_values[l_i] != "PAD"]
-        valid_tags = [NER_BERT.tag_values[l_i] for l in true_labels
-                                    for l_i in l if NER_BERT.tag_values[l_i] != "PAD"]
+        pred_tags = [NER_DistilBERT.tag_values[p_i] for p, l in zip(predictions, true_labels)
+                                    for p_i, l_i in zip(p, l) if NER_DistilBERT.tag_values[l_i] != "PAD"]
+        valid_tags = [NER_DistilBERT.tag_values[l_i] for l in true_labels
+                                    for l_i in l if NER_DistilBERT.tag_values[l_i] != "PAD"]
         print("Validation Accuracy: {}".format(accuracy_score(pred_tags, valid_tags)))
         print("Validation F1-Score: {}".format(f1_score(valid_tags, pred_tags, average='weighted')))
         labels = ["ID", "PHI", "NAME", "CONTACT", "DATE", "AGE",
