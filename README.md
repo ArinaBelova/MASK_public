@@ -26,9 +26,31 @@ More concretly:
 
 `python train_framework.py --source-type i2b2 --source_location "dataset/i2b2/" --algorithm NER_CRF --do_test yes --save_model yes --epochs 5`
 
-- mask_framework.py - This file is used to run NER and masking. As input it uses a set of text files and outputs a set of text fules. Input and output paths, as well as masking and NER algorithms are defined in configuration.cnf file. 
+- mask_framework.py - This file is used to run NER and masking. As input it uses a set of text files and outputs a set of text files. Input and output paths, as well as masking and NER algorithms are defined in configuration.cnf file. 
 
 Training of NER algorithms is at the moment supported only if in i2b2 format (other format need to be converted to this format). i2b2 2014, which have been used in development of this tool can be requested at the following location: https://portal.dbmi.hms.harvard.edu/projects/n2c2-nlp/
+
+## Configuration file
+Configuration file is in .xml format.
+Most important or tunable part of configuration file is under <algorithms> tag, where we have a bunch of <entity> tags. Let's consider an example, where we want to mask entity NAME:
+
+```xml
+<entity>
+    <entity_name>NAME</entity_name>   <!-- entity to mask -->
+    <original_name>NAME</original_name>  <!-- don't really need this, I guess it was added to comply with i2b2 tags, as they have 2 types, one of which is more fine-grained than other. ("NAME" can be "DOCTOR" or "PATIENT", but for our taining and masking purposes we use only "NAME") -->
+    <algorithm> <!-- currently MASK supports comparison of solutions of 2 algorithms only. Can be extended in the future if needed. -->
+        <algorithm1>NER_BERT_BiLSTM</algorithm1> <!-- first algorithm to detect the entity (no prioity between algorithms!) -->
+        <algorithm2>NER_BERT</algorithm2> <!-- second algorithm to detect the entity -->
+    </algorithm>
+    <!-- Resolution is either intersection of results (both algorithms predicts that tag) or union (one of algorithms predict the result and we take union of all those results)-->
+    <resolution>union</resolution>
+    <masking_type>Mask</masking_type> <!-- masking type, can be either "Redact" or "Mask" -->
+    <masking_class>mask_name_simple</masking_class> <!-- masking mechanism -->
+</entity>
+```
+
+Some notes about <resultion> tag, consider two scenarios:
+
 
 ## Publications
 
