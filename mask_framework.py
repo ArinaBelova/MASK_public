@@ -32,7 +32,7 @@ import re
 import time
 
 # TODO: some algorithms like CRF and its variations do not like files to mask in .xml format, which causes pai for the evaluation on test set of their performance.
-# I am not sure why this problem was not addressed earlier, but that is for the future (summer?) to solve. 
+# I am not sure why this problem was not addressed earlier, but that is for the future (summer?) to solve.
 
 # CLEANR = re.compile('<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6});')
 
@@ -72,29 +72,29 @@ class Configuration():
                             # if entity["algorithm"] has subelements <algorithm1>, <algorithm2>
                             if list(ent):
                                 list_alg = []
-                                for algorithm in ent: 
-                                    list_alg.append(algorithm.text)   
+                                for algorithm in ent:
+                                    list_alg.append(algorithm.text)
                                 entity[ent.tag] = list_alg
-                            # if there is only one algorithm and no nested structure in entity["algorithm"]   
+                            # if there is only one algorithm and no nested structure in entity["algorithm"]
                             else:
-                                entity[ent.tag] = [ent.text]      
+                                entity[ent.tag] = [ent.text]
                         # for the rest of tags in <entity>
                         else:
                             entity[ent.tag] = ent.text
                     self.entities_list.append(entity)
-            
+
             # For several algorithms on one entity we may apply either union of labels idea or intersection of labels idea
             # TODO: describe more in detail what each option means.
             if elem.tag == "resolution":
-                self.resolution = elem.text        
-            
+                self.resolution = elem.text
+
             if elem.tag == "dataset":
                 for ent in elem:
                     if ent.tag == "dataset_location":
                         self.dataset_location = ent.text
                     if ent.tag == "data_output":
                         self.data_output = ent.text
-       
+
 _treebank_word_tokenizer = TreebankWordTokenizer()
 
 def consolidate_NER_results(final_sequences, text):
@@ -122,17 +122,11 @@ def consolidate_NER_results(final_sequences, text):
             label = final_sequences[i][j][1]
             span_min = spans[multiplier+j][0]
             span_max = spans[multiplier+j][1]
-            # Maybe not the most elegant soluion to BERT tokenisation issue, when punctuation 
+            # Maybe not the most elegant soluion to BERT tokenisation issue, when punctuation
             # signs are considered to be labels.
-            if (token == "/" or token == "," or token == "-" or token == "\\") and label == "DATE":
+            if (token == "/" or token == "," or token == "-" or token == "\\") and (label == "DATE" or label == "LOCATION" or label == "ID" or label == "CONTACT" or label == "PROFESSION"):
                 label = "O"
-            # Similar issue happens with NAME
-            if (token == "," or token == ".") and (label == "NAME" or label == "LOCATION"):
-                label = "O"
-            # Similar issue happens with ID
-            if (token == "-") and label == "ID":
-                label = "O"              
-            fin.append((token, label, span_min, span_max))    
+            fin.append((token, label, span_min, span_max))
     return fin
 
 def recalculate_tokens(token_array, index, token_size, replacement_size, new_text, new_token):
@@ -162,11 +156,11 @@ def recalculate_tokens(token_array, index, token_size, replacement_size, new_tex
             new_token_array.append((token_array[i][0], token_array[i][1], new_start, new_end))
         else:
             new_token_array.append(token_array[i])
-  
+
     return new_token_array
 
 
-def compare_results(resolution, alg_result_1, alg_result_2):
+def compare_results(resolution, entity_name, alg_result_1, alg_result_2, mask_running_log):
     # Now the fun part
     # We consider 3-4 cases:
 
@@ -175,7 +169,17 @@ def compare_results(resolution, alg_result_1, alg_result_2):
     # loop over indices of arrays as we will need to look in thee future as well as in the past
     for alg1_idx, alg2_idx in zip(range(len(alg_result_1)), range(len(alg_result_2))): # alg1 and alg2 of shape: (token, label, span_min, span_max)
         # Assert that we compare elements with the same tokens
-        assert alg_result_1[alg1_idx][0] == alg_result_2[alg2_idx][0], f"Tokens {alg_result_1[alg1_idx][0]} and {alg_result_2[alg2_idx][0]} are not equal" 
+        if alg_result_1[alg1_idx][0] == "can":
+            print("Token before for alg1")
+            print(alg_result_1[alg1_idx - 1][0])
+            print("Token before for alg2")
+            print(alg_result_2[alg2_idx - 1][0])
+            print("Token after for alg1")
+            print(alg_result_1[alg1_idx + 1][0])
+            print("Token after for alg2")
+            print(alg_result_2[alg2_idx + 1][0])
+
+        assert alg_result_1[alg1_idx][0] == alg_result_2[alg2_idx][0], f"Tokens {alg_result_1[alg1_idx][0]} and {alg_result_2[alg2_idx][0]} are not equal"
         # If labels or spans are not equal, this is bad. You need to align outputs of models in the fashin of BERT.
         # To be discussed in the documentation.
 
@@ -184,15 +188,11 @@ def compare_results(resolution, alg_result_1, alg_result_2):
 
         # print(f"My tag for algo1 is {alg_result_1[alg1_idx][1]}")
         # print(f"My tag for algo2 is {alg_result_2[alg2_idx][1]}")
-        # TODO: solve alignment problems to the stule of BERT alignment. Need to change al CRF algorithms and check fro Glove BiLSTM.
+        # TODO: solve alignment problems to the style of BERT alignment. Need to change al CRF algorithms and check fro Glove BiLSTM.
         # CASE 1: If for certain token algorithm1 returns "O" and algorithm2 returns "ENTITY_NAME", use "ENTITY_NAME" overal
 
         alg1_pred = alg_result_1[alg1_idx][1]
         alg2_pred = alg_result_2[alg2_idx][1]
-
-        if alg_result_1[alg1_idx][0] == "Manchester":
-            print(f"Alg1 predicted {alg1_pred}")
-            print(f"Alg2 predicted {alg2_pred}")
 
         result = []
 
@@ -200,39 +200,55 @@ def compare_results(resolution, alg_result_1, alg_result_2):
             union = ""
             if (alg1_pred == "O") and (alg2_pred != "O"):
                 union = alg2_pred
-            elif (alg2_pred == "O") and (alg1_pred != "O"): 
+            elif (alg2_pred == "O") and (alg1_pred != "O"):
                 union = alg1_pred
             elif (alg1_pred != "O") and (alg2_pred != "O"):
                 if alg1_pred == alg2_pred:
                     union = alg1_pred
-                else:
-                    raise Exception(f"Problem of intersection of dstinct token labels has occured") 
+                else: # it may happen, in that case take a token recognised with current entity_name we cater for (?)
+                    token = alg_result_1[alg1_idx][0]
+                    low = alg_result_1[alg1_idx][2]
+                    high = alg_result_1[alg1_idx][3]
+                    # if labels are not equal -> choose label of leading algorithm 1
+                    mask_running_log.write(f"There is a debate: Algorithm 1 recognised a token {token} with span ({low}, {high}) as {alg1_pred} and Algorithm 2 recognised it as {alg2_pred}. Right now we classify for entiy {entity_name}"
+                    + "\n" + f"Human analyst should look at this problem manually, for now this entity is set as {alg1_pred} as algorithm 1 is the lead"
+                    + "\n" + "----------------------------------------------------------------------------------------------------------------------------------------------------------------------"+ "\n")
+                    union = alg1_pred
+                    #raise Exception(f"Problem of intersection of dstinct token labels has occured alg1 recognised it as {alg1_pred} and alg2 recognised it as {alg2_pred}")
             else:
-                union = "O"          
-            result.append(alg_result_1[alg1_idx][0])    # token       
+                union = "O"
+            result.append(alg_result_1[alg1_idx][0])    # token
             result.append(union) # label
             result.append(alg_result_1[alg1_idx][2]) # lower bound of span
             result.append(alg_result_1[alg1_idx][3]) # upper bound of span
             result = tuple(result)
-            print(result)
 
         elif resolution == "intersection":
             intersection = ""
             if (alg1_pred == "O") or (alg2_pred == "O"):
-                union = "O"
+                intersection = "O"
+            elif (alg1_pred != "O") and (alg2_pred != "O") and (alg1_pred == alg2_pred):
+                    intersection == alg1_pred
             elif (alg1_pred != "O") and (alg2_pred != "O") and (alg1_pred != alg2_pred):
-                print("We are in big trouble:")
-                print(f"Predicted label of algorithm 1 (check whch one in configuration) is {alg1_pred} and of algorithm 2 is {alg2_pred}")    
+                token = alg_result_1[alg1_idx][0]
+                low = alg_result_1[alg1_idx][2]
+                high = alg_result_1[alg1_idx][3]
+                # if labels are not equal -> choose label of leading algorithm 1
+                mask_running_log.write(f"There is a debate: Algorithm 1 recognised a token {token} with span ({low}, {high}) as {alg1_pred} and Algorithm 2 recognised it as {alg2_pred}. Right now we classify for entiy {entity_name}"
+                 + "\n" + f"Human analyst should look at this problem manually, for now this entity is set as {alg1_pred} as algorithm 1 is the lead"
+                 + "\n" + "----------------------------------------------------------------------------------------------------------------------------------------------------------------------"+ "\n")
 
-            result.append(alg_result_1[alg1_idx][0])    # token       
+                intersection = alg1_pred
+
+            result.append(alg_result_1[alg1_idx][0])    # token
             result.append(intersection) # label
             result.append(alg_result_1[alg1_idx][2]) # lower bound of span
             result.append(alg_result_1[alg1_idx][3]) # upper bound of span
             result = tuple(result)
-            print(result)
 
-        overall_result.append(result)    
+        overall_result.append(result)
 
+    # If union/intersection was unsucessful -> log it to the user to investigate.
     return overall_result
 
 def main():
@@ -245,18 +261,20 @@ def main():
     # Load algorithms in data structure
     # TODO: Still optimize!
     for entity in cf.entities_list:
-        # If I want to run several algos on the same entity and configuration, we will have several instances 
+        # If I want to run several algos on the same entity and configuration, we will have several instances
         # of instructions in algorithms array to pass to the worker.
         for alg_name in entity["algorithm"]:
-            algorithm = "ner_plugins." + alg_name            
+            algorithm = "ner_plugins." + alg_name
             masking_type = entity['masking_type']
             entity_name = entity['entity_name']
-            if "masking_class" in entity:
+            if masking_type == "Redact":
+                masking_class = ""
+            else:
                 masking_class = entity['masking_class']
 
             # if we have 2 models for one entity, we need to know whether we should do union or intersection of results of models:
             if "resolution" in entity:
-                resolution = entity["resolution"]        
+                resolution = entity["resolution"]
 
             # Import the right module
             right_module = importlib.import_module(algorithm)
@@ -272,48 +290,63 @@ def main():
     mask_running_log.write("Time of run: " + str(datetime.datetime.now()) + "\n\n")
     mask_running_log.write("RUN LOG \n")
     elements = []
+
+    times = []
     for file in data:
         mask_running_log.write("Running stats for file: "+file+'\n')
         text = open(cf.dataset_location+"/"+file, 'r').read()
         new_text = text   # text is an original text
         overal_result = []
 
-        for i in range(0, len(algorithms)): # for each function call
+        time_all_1 = time.time()
+
+        for i in range(0, len(algorithms)): # for each function call, algorithms - list of disctionaries
             alg = algorithms[i]
             next_alg = {}
             next_alg_entity_name = ""
 
             entity_name = alg["entity_name"]
             if i != (len(algorithms) - 1): # last instruction in the algorithms dictionary does not have any future
-                next_alg = algorithms[i+1]
+                next_alg = algorithms[i+1] # for the check if next algorithm's entity is the same as the current one
                 next_alg_entity_name = next_alg["entity_name"]
 
             # if this is the case, we know that we will need to compare the results of 2 algorithms outputs.
-            if entity_name == next_alg_entity_name: 
-                #print(f"I am in TWO-ALGORITHMS completion of results for {entity_name} and algorithm {algorithm_name}")
-                alg_result_1 = next_alg["instance"].perform_NER(new_text)
-                alg_result_1 = consolidate_NER_results(alg_result_1, new_text) # (token, label, span_min, span_max)
+            if entity_name == next_alg_entity_name:
+                continue # as we will combine the output for entity on the next run to run masking only once instead of twice!
 
-                alg_result_2 = alg["instance"].perform_NER(new_text)
-                alg_result_2 = consolidate_NER_results(alg_result_2, new_text) # (token, label, span_min, span_max)
+            else:
+                previous_alg = algorithms[i-1]
+                previous_alg_entity_name = previous_alg["entity_name"]
 
-                # Do function compare_results(result1, result2) that returns overall result
-                overal_result = compare_results(resolution, alg_result_1, alg_result_2)
-           
-            else:  
-                #print(f"I am in one-algorithms completion of results for {entity_name} and algorithm {algorithm_name}!")
-                start = time.time()
-                alg_result_1 = alg["instance"].perform_NER(new_text)
-                end = time.time()
+                if previous_alg_entity_name == entity_name:
+                    #print(f"I am in two-algorithms completion of results for {entity_name} and algorithms {alg["algorithm"]} and {previous_alg["algorithm"]}!")
+                    alg_result_1 = previous_alg["instance"].perform_NER(new_text)
+                    alg_result_1 = consolidate_NER_results(alg_result_1, new_text) # (token, label, span_min, span_max)
 
-                print("TIME FOR algorithm {} to execute NER on entity_name {} is {}".format(alg["algorithm"], entity_name, (end-start)))
+                    alg_result_2 = alg["instance"].perform_NER(new_text)
+                    alg_result_2 = consolidate_NER_results(alg_result_2, new_text) # (token, label, span_min, span_max)
 
-                alg_result_1 = consolidate_NER_results(alg_result_1, new_text) # (token, label, span_min, span_max)
-                
-                overal_result = alg_result_1
-                
+                    # Do function compare_results(result1, result2) that returns overall result
+                    previous_alg_name = previous_alg["algorithm"]
+                    current_alg_name = alg["algorithm"]
+                    print(f"alg1 is {previous_alg_name} and alg2 is {current_alg_name}")
+                    overal_result = compare_results(resolution, entity_name, alg_result_1, alg_result_2, mask_running_log)
+                else:
+                    #print(f"I am in one-algorithms completion of results for {entity_name} and algorithm {alg["algorithm"]}!")
+                    start = time.time()
+                    alg_result_1 = alg["instance"].perform_NER(new_text)
+                    end = time.time()
+
+                    print("TIME FOR algorithm {} to execute NER on entity_name {} is {}".format(alg["algorithm"], entity_name, (end-start)))
+
+                    alg_result_1 = consolidate_NER_results(alg_result_1, new_text) # (token, label, span_min, span_max)
+
+                    overal_result = alg_result_1
+
 
             #Perform masking/redacting
+            masking_type = alg["masking_type"]
+            print("PROCESSED ONE ALGORITHM FUNCTIONAL CALL")
 
             if masking_type == "Redact":
                 for i in range(0, len(overal_result)):
@@ -332,6 +365,7 @@ def main():
 
             elif masking_type == "Mask":
                 masking_class = alg["masking_class"]
+                print(f"MY ENTITY NAME IS {entity_name}")
                 plugin_module = importlib.import_module("masking_plugins." + masking_class)
                 class_masking = getattr(plugin_module, masking_class)
                 masking_instance = class_masking()
@@ -346,7 +380,12 @@ def main():
                         token_max_span = overal_result[i][3]
                         overal_result = recalculate_tokens(overal_result, i, token_size, replacement_size, new_text, new_token)
                         elements.append(overal_result[i][1])
-                        mask_running_log.write("MASKED ENTITY: " + overal_result[i][1] + " with span (" + str(token_min_span) + ", " + str(token_max_span) + ") " + " -- " + old_token + ' ->' + new_token + '\n')              
+                        mask_running_log.write("MASKED ENTITY: " + overal_result[i][1] + " with span (" + str(token_min_span) + ", " + str(token_max_span) + ") " + " -- " + old_token + ' ->' + new_token + '\n')
+
+        time_all_2 = time.time()
+
+        print("TIME to execute FULL NER FOR ONE DOCUMENT is {}".format(time_all_2-time_all_1))
+        times.append((time_all_2-time_all_1))
 
         # Create target Directory if don't exist
         if not path.exists(cf.data_output):
@@ -358,15 +397,24 @@ def main():
 
         # Write a log file, there is currently a TODO: to support writing a log for 2 algorithms or more on one entity. Don't have time now to solve this issue now.
         # This functionality of logging total number of masked entities is not crucial for now.
-        for alg in algorithms:
-            cnt = elements.count(entity_name)
-            if masking_type == "Mask":
-                mask_running_log.write('Total masked for '+entity_name+": "+str(cnt)+'\n')
-            if masking_type == "Redact":
-                mask_running_log.write('Total redacted for '+entity_name+": "+str(cnt)+'\n')
+        # for alg in algorithms:
+        #     cnt = elements.count(entity_name)
+        #     if masking_type == "Mask":
+        #         mask_running_log.write('Total masked for '+entity_name+": "+str(cnt)+'\n')
+        #     if masking_type == "Redact":
+        #         mask_running_log.write('Total redacted for '+entity_name+": "+str(cnt)+'\n')
 
         mask_running_log.write('END for file:'+ file+'\n')
         mask_running_log.write('========================================================================')
+
+
+    import numpy as np
+    avg_arr = np.array(times)
+    avg = np.average(avg_arr)
+    std = np.std(avg_arr)
+    print(f"AVERAGE TIME TO EXECUTE ON ALL NER ENTITIES FOR 10 DOCUMENTS IS {avg}")
+    print(f"STD OF TIME TO EXECUTE ON ALL NER ENTITIES FOR 10 DOCUMENTS IS {std}")
+
     mask_running_log.close()
 
 
