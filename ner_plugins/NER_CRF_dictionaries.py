@@ -15,6 +15,7 @@ limitations under the License.
 """
 
 #Code by Nikola Milosevic
+from msilib import sequence
 import os
 
 import sklearn_crfsuite
@@ -24,6 +25,9 @@ from ner_plugins.NER_abstract import NER_abstract
 from utils.spec_tokenizers import tokenize_fa
 import csv
 import re
+from sklearn import metrics
+from seqeval.metrics import accuracy_score
+from sklearn.metrics import f1_score
 
 class NER_CRF_dictionaries(NER_abstract):
     """
@@ -31,7 +35,7 @@ class NER_CRF_dictionaries(NER_abstract):
 
     """
     def __init__(self):
-        print("I AM IN CRF")
+        print("I AM IN CRF DICTIONARY")
         filename = 'Models/NER_CRF_dictionaries1.sav'
         self.crf_model = sklearn_crfsuite.CRF(
             algorithm='lbfgs',
@@ -349,6 +353,7 @@ class NER_CRF_dictionaries(NER_abstract):
         :param model_path: File name in Models/ folder
         :return:
         """
+        print("Saved model on disc")
         filename = "Models/"+model_path+"1.sav"
         pickle.dump(self.crf_model, open(filename, 'wb'))
 
@@ -359,15 +364,37 @@ class NER_CRF_dictionaries(NER_abstract):
         :param Y: True labels
         :return: Prints the classification report
         """
-        from sklearn import metrics
         Y_pred = self.crf_model.predict(X)
         labels = list(self.crf_model.classes_)
         labels.remove('O')
         Y_pred_flat  = [item for sublist in Y_pred for item in sublist]
         Y_flat = [item for sublist in Y for item in sublist]
-        print(metrics.classification_report(Y_pred_flat, Y_flat,labels))
+
+        #####################################################################################################################
+        # There is one-to-one correspondence between CRF results and initial data, trying to make CRF to be in BERT fashion:
+        crf_dat = []
+        for lis in X:
+            for el in lis:
+                dat = el["word.lower()"]
+                crf_dat.append(dat)
+        fin_labels = []
+
+        for word, label in zip(crf_dat, Y_pred_flat):
+            # Tokenize the word and count # of subwords the word is broken into
+            tokenized_word = re.split("([\W | _])", word) # the most fucking clever regexpr in my life
+            tokenized_word = [t  for t in tokenized_word if t != ""]
+            n_subwords = len(tokenized_word)
+            # Add the same label to the new list of labels `n_subwords` times
+            fin_labels.extend([label] * n_subwords)
+
+        #####################################################################################################################
+
+        print("Validation Accuracy: {}".format(accuracy_score(Y_flat, Y_pred_flat)))  # was other way around, why?
+        print("Validation F1-Score: {}".format(f1_score(Y_flat, Y_pred_flat, average='weighted'))) # correct
+        print(metrics.classification_report(Y_flat, Y_pred_flat,labels=labels))
         print()
-        print(metrics.confusion_matrix(Y_pred_flat, Y_flat))
+        print(metrics.confusion_matrix(Y_flat, Y_pred_flat))
+        return fin_labels
 
     def perform_NER(self,text):
         """
@@ -379,21 +406,28 @@ class NER_CRF_dictionaries(NER_abstract):
           """
         X_test = []
         documents = [text]
-        sequences = tokenize_fa(documents)
+        #sequences = tokenize_fa(documents) # Need this as it somehow forms an input that is digestably by CRF
+
+        import nltk
+        nltk.download('punkt')
+        _treebank_word_tokenizer = TreebankWordTokenizer()
+        sentences = nltk.sent_tokenize(text, language='english')
+        sequences = []
+        for sent in sentences:
+            sequences.append(_treebank_word_tokenizer.tokenize(sent))
+
         word_sequences = []
         for seq in sequences:
             features_seq = []
-            labels_seq = []
             sentence = []
             for i in range(0, len(seq)):
                 features_seq.append(self.word2features(seq, i))
-                labels_seq.append(self.word2labels(seq[i]))
-                sentence.append(seq[i][0])
+                sentence.append(seq[i])
             X_test.append(features_seq)
             word_sequences.append(sentence)
         y_pred = self.crf_model.predict(X_test)
 
-        # New formatting of the output supporting combination of algorithms.        
+        # New formatting of the output supporting combination of algorithms.
         final_sequences, fin_tokenized_sentence, fin_labels = [], [], []
 
         for word_sequence, label in zip(word_sequences, y_pred):
@@ -418,7 +452,7 @@ class NER_CRF_dictionaries(NER_abstract):
 
             final_sequences.append(sentence)
 
-        return final_sequences    
+        return final_sequences
 
         # Old code for formatting the outputs. Is not supported in combination of algorithms.
         # final_sequences = []

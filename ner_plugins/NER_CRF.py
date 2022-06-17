@@ -22,6 +22,10 @@ import pickle
 from nltk.tokenize.treebank import TreebankWordTokenizer
 from ner_plugins.NER_abstract import NER_abstract
 from utils.spec_tokenizers import tokenize_fa
+from seqeval.metrics import accuracy_score
+from sklearn.metrics import f1_score
+
+import re
 
 class NER_CRF(NER_abstract):
     """
@@ -59,11 +63,11 @@ class NER_CRF(NER_abstract):
                 shape = shape + letter
         return shape
 
-    #  To build a conditional random field, you just define a bunch of feature functions 
+    #  To build a conditional random field, you just define a bunch of feature functions
     # (which can depend on the entire sentence, a current position, and nearby labels),
     #  assign them weights, and add them all together,
-    #  transforming at the end to a probability if necessary.   
-    # This brilliant explanation is taken from: https://blog.echen.me/2012/01/03/introduction-to-conditional-random-fields/ 
+    #  transforming at the end to a probability if necessary.
+    # This brilliant explanation is taken from: https://blog.echen.me/2012/01/03/introduction-to-conditional-random-fields/
 
     def word2features(self,sent, i):
         """
@@ -293,7 +297,12 @@ class NER_CRF(NER_abstract):
         labels.remove('O')
         Y_pred_flat  = [item for sublist in Y_pred for item in sublist]
         Y_flat = [item for sublist in Y for item in sublist]
-        print(metrics.classification_report(Y_pred_flat, Y_flat,labels=labels))
+        print("Validation Accuracy: {}".format(accuracy_score(Y_flat, Y_pred_flat)))  # was other way around, why?
+        print("Validation F1-Score: {}".format(f1_score(Y_flat, Y_pred_flat, average='weighted'))) # correct
+        print(metrics.classification_report(Y_flat, Y_pred_flat,labels=labels))
+        print()
+        print(metrics.confusion_matrix(Y_flat, Y_pred_flat))
+        return Y_pred_flat
 
     def perform_NER(self,text):
         """
@@ -302,26 +311,42 @@ class NER_CRF(NER_abstract):
           :param text: text over which should be performed named entity recognition
           :type language: str
 
-          """  
+          """
+        print(text)
         X_test = []
         documents = [text]
-        sequences = tokenize_fa(documents)
+        #sequences = tokenize_fa(documents)
+        ##############
+        # from nltk.tokenize import sent_tokenize
+
+        # sentences = sent_tokenize(text)
+        # sequences = []
+        # for sent in sentences:
+        #     words = self._treebank_word_tokenizer.tokenize(sent)
+        #     for word in words:
+        #         t = (word, "O")
+        #         sequences.extend(t)
+        ##############
+        import nltk
+        nltk.download('punkt')
+        _treebank_word_tokenizer = TreebankWordTokenizer()
+        sentences = nltk.sent_tokenize(text, language='english')
+        sequences = []
+        for sent in sentences:
+        sequences.append(_treebank_word_tokenizer.tokenize(sent))
+
         word_sequences = []
         for seq in sequences:
             features_seq = []
-            labels_seq = []
             sentence = []
             for i in range(0, len(seq)):
                 features_seq.append(self.word2features(seq, i))
-                labels_seq.append(self.word2labels(seq[i]))
                 sentence.append(seq[i][0])
             X_test.append(features_seq)
             word_sequences.append(sentence)
         y_pred = self.crf_model.predict(X_test)
+
         final_sequences = []
-
-        import re
-
         fin_tokenized_sentence, fin_labels = [], []
 
         for word_sequence, label in zip(word_sequences, y_pred):

@@ -53,7 +53,7 @@ class Configuration():
         self.conf = configuration
         conf_doc = ET.parse(self.conf)
         root = conf_doc.getroot()
-        print(root.text)
+        #print(root.text)
         self.entities_list = []
         for elem in root:
             if elem.tag == "project_name":
@@ -109,6 +109,7 @@ def consolidate_NER_results(final_sequences, text):
     for a in final_sequences:
         for b in a:
             tokens.append(b[0])
+
     spans = align_tokens(tokens, text) # get the list of spans for these tokens
     fin = []
     multiplier = 0
@@ -124,7 +125,7 @@ def consolidate_NER_results(final_sequences, text):
             span_max = spans[multiplier+j][1]
             # Maybe not the most elegant soluion to BERT tokenisation issue, when punctuation
             # signs are considered to be labels.
-            if (token == "/" or token == "," or token == "-" or token == "\\") and (label == "DATE" or label == "LOCATION" or label == "ID" or label == "CONTACT" or label == "PROFESSION"):
+            if (token == "/" or token == "," or token == "-" or token == "\\" or token == ".") and (label == "DATE" or label == "NAME" or label == "LOCATION" or label == "ID" or label == "CONTACT" or label == "PROFESSION"):
                 label = "O"
             fin.append((token, label, span_min, span_max))
     return fin
@@ -169,15 +170,6 @@ def compare_results(resolution, entity_name, alg_result_1, alg_result_2, mask_ru
     # loop over indices of arrays as we will need to look in thee future as well as in the past
     for alg1_idx, alg2_idx in zip(range(len(alg_result_1)), range(len(alg_result_2))): # alg1 and alg2 of shape: (token, label, span_min, span_max)
         # Assert that we compare elements with the same tokens
-        if alg_result_1[alg1_idx][0] == "can":
-            print("Token before for alg1")
-            print(alg_result_1[alg1_idx - 1][0])
-            print("Token before for alg2")
-            print(alg_result_2[alg2_idx - 1][0])
-            print("Token after for alg1")
-            print(alg_result_1[alg1_idx + 1][0])
-            print("Token after for alg2")
-            print(alg_result_2[alg2_idx + 1][0])
 
         assert alg_result_1[alg1_idx][0] == alg_result_2[alg2_idx][0], f"Tokens {alg_result_1[alg1_idx][0]} and {alg_result_2[alg2_idx][0]} are not equal"
         # If labels or spans are not equal, this is bad. You need to align outputs of models in the fashin of BERT.
@@ -199,13 +191,16 @@ def compare_results(resolution, entity_name, alg_result_1, alg_result_2, mask_ru
         if resolution == "union":
             union = ""
             if (alg1_pred == "O") and (alg2_pred != "O"):
+                mask_running_log.write(f"Algorithm 1 recognised token {alg_result_1[alg1_idx][0]} with span ({alg_result_1[alg1_idx][2]},{alg_result_1[alg1_idx][3]}) as 'O' and algorithm 2 recognised it as {alg2_pred}" + "\n")
                 union = alg2_pred
-            elif (alg2_pred == "O") and (alg1_pred != "O"):
+            elif (alg2_pred == "O") and (alg1_pred != "O") and (alg1_pred != "PAD"):
+                mask_running_log.write(f"Algorithm 1 recognised token {alg_result_1[alg1_idx][0]} with span ({alg_result_1[alg1_idx][2]},{alg_result_1[alg1_idx][3]}) as {alg1_pred} and algorithm 2 recognised it as 'O'"+ "\n")
                 union = alg1_pred
             elif (alg1_pred != "O") and (alg2_pred != "O"):
                 if alg1_pred == alg2_pred:
                     union = alg1_pred
-                else: # it may happen, in that case take a token recognised with current entity_name we cater for (?)
+                # it may happen, in that case take a token recognised with current entity_name we cater for (?)
+                elif (alg1_pred == entity_name) or (alg2_pred == entity_name):
                     token = alg_result_1[alg1_idx][0]
                     low = alg_result_1[alg1_idx][2]
                     high = alg_result_1[alg1_idx][3]
@@ -215,6 +210,8 @@ def compare_results(resolution, entity_name, alg_result_1, alg_result_2, mask_ru
                     + "\n" + "----------------------------------------------------------------------------------------------------------------------------------------------------------------------"+ "\n")
                     union = alg1_pred
                     #raise Exception(f"Problem of intersection of dstinct token labels has occured alg1 recognised it as {alg1_pred} and alg2 recognised it as {alg2_pred}")
+                # else:
+                #     union = "O"
             else:
                 union = "O"
             result.append(alg_result_1[alg1_idx][0])    # token
@@ -225,11 +222,15 @@ def compare_results(resolution, entity_name, alg_result_1, alg_result_2, mask_ru
 
         elif resolution == "intersection":
             intersection = ""
-            if (alg1_pred == "O") or (alg2_pred == "O"):
+            if (alg1_pred == "O") and (alg2_pred != "O"):
+                mask_running_log.write(f"Algorithm 1 recognised token {alg_result_1[alg1_idx][0]} with span ({alg_result_1[alg1_idx][2]},{alg_result_1[alg1_idx][3]}) as 'O' and algorithm 2 recognised it as {alg2_pred}" + "\n")
+                intersection = "O"
+            elif (alg2_pred == "O") and (alg1_pred != "O") and (alg1_pred != "PAD"):
+                mask_running_log.write(f"Algorithm 1 recognised token {alg_result_1[alg1_idx][0]} with span ({alg_result_1[alg1_idx][2]},{alg_result_1[alg1_idx][3]}) as {alg1_pred} and algorithm 2 recognised it as 'O'"+ "\n")
                 intersection = "O"
             elif (alg1_pred != "O") and (alg2_pred != "O") and (alg1_pred == alg2_pred):
                     intersection == alg1_pred
-            elif (alg1_pred != "O") and (alg2_pred != "O") and (alg1_pred != alg2_pred):
+            elif (alg1_pred != "O") and (alg2_pred != "O") and (alg1_pred != alg2_pred) and ((alg1_pred == entity_name) or (alg2_pred == entity_name)):
                 token = alg_result_1[alg1_idx][0]
                 low = alg_result_1[alg1_idx][2]
                 high = alg_result_1[alg1_idx][3]
@@ -239,6 +240,8 @@ def compare_results(resolution, entity_name, alg_result_1, alg_result_2, mask_ru
                  + "\n" + "----------------------------------------------------------------------------------------------------------------------------------------------------------------------"+ "\n")
 
                 intersection = alg1_pred
+            else:
+                intersection = "O"
 
             result.append(alg_result_1[alg1_idx][0])    # token
             result.append(intersection) # label
@@ -321,9 +324,13 @@ def main():
                 if previous_alg_entity_name == entity_name:
                     #print(f"I am in two-algorithms completion of results for {entity_name} and algorithms {alg["algorithm"]} and {previous_alg["algorithm"]}!")
                     alg_result_1 = previous_alg["instance"].perform_NER(new_text)
+                    # print(f"RESULTS OF ALGO 1 NER_BERT")
+                    # print(alg_result_1)
                     alg_result_1 = consolidate_NER_results(alg_result_1, new_text) # (token, label, span_min, span_max)
 
                     alg_result_2 = alg["instance"].perform_NER(new_text)
+                    # print(f"RESULTS OF ALGO 2 NER_CRF")
+                    # print(alg_result_2)
                     alg_result_2 = consolidate_NER_results(alg_result_2, new_text) # (token, label, span_min, span_max)
 
                     # Do function compare_results(result1, result2) that returns overall result
@@ -361,7 +368,7 @@ def main():
                         overal_result = recalculate_tokens(overal_result, i, token_size, replacement_size, new_text, new_token)
                         elements.append(overal_result[i][1])
                         # We want to log spans of the identified entity to ease the job of manual identification by analysts.
-                        mask_running_log.write("REDACTED ENTITY: " + overal_result[i][1] + " with span (" + str(token_min_span) + ", " + str(token_max_span) + ") " + " -- " + old_token + ' ->' + new_token + '\n')
+                        mask_running_log.write("REDACTED ENTITY: " + overal_result[i][0] + " with span (" + str(token_min_span) + ", " + str(token_max_span) + ") " + " -- " + old_token + ' ->' + new_token + '\n')
 
             elif masking_type == "Mask":
                 masking_class = alg["masking_class"]
@@ -380,7 +387,7 @@ def main():
                         token_max_span = overal_result[i][3]
                         overal_result = recalculate_tokens(overal_result, i, token_size, replacement_size, new_text, new_token)
                         elements.append(overal_result[i][1])
-                        mask_running_log.write("MASKED ENTITY: " + overal_result[i][1] + " with span (" + str(token_min_span) + ", " + str(token_max_span) + ") " + " -- " + old_token + ' ->' + new_token + '\n')
+                        mask_running_log.write("MASKED ENTITY: " + overal_result[i][0] + " with span (" + str(token_min_span) + ", " + str(token_max_span) + ") " + " -- " + old_token + ' ->' + new_token + '\n')
 
         time_all_2 = time.time()
 
@@ -412,8 +419,8 @@ def main():
     avg_arr = np.array(times)
     avg = np.average(avg_arr)
     std = np.std(avg_arr)
-    print(f"AVERAGE TIME TO EXECUTE ON ALL NER ENTITIES FOR 10 DOCUMENTS IS {avg}")
-    print(f"STD OF TIME TO EXECUTE ON ALL NER ENTITIES FOR 10 DOCUMENTS IS {std}")
+    print(f"AVERAGE TIME TO EXECUTE ON ALL NER ENTITIES FOR THE DOCUMENTS IN THE INPUT IS {avg}")
+    print(f"STD OF TIME TO EXECUTE ON ALL NER ENTITIES FOR THE DOCUMENTS IN THE INPUT IS {std}")
 
     mask_running_log.close()
 

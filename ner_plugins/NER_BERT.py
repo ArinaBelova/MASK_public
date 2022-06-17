@@ -17,9 +17,9 @@ from transformers import BertForTokenClassification, AdamW
 from transformers import get_linear_schedule_with_warmup
 
 from seqeval.metrics import accuracy_score
-from sklearn.metrics import f1_score, classification_report
+from sklearn.metrics import f1_score, classification_report, precision_score, recall_score
 
-import torch.nn as nn 
+import torch.nn as nn
 
 from tqdm import trange
 import numpy as np
@@ -29,8 +29,16 @@ from nltk.tokenize import sent_tokenize
 
 import os
 
+##########################################################
+# import wandb
+# from transformers import TrainingArguments, Trainer
+
+# wandb.init(project="project", entity="3rd_year_project")
+##########################################################
+
+
 class NER_BERT(object):
-    device = torch.device("cpu")
+    device = torch.device("cuda")
     #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     tag2idx = {'O':0, 'ID':1, 'PHI':2, 'NAME':3, 'CONTACT':4, 'DATE':5, 'AGE':6, 'PROFESSION':7, 'LOCATION':8, 'PAD': 9}
@@ -43,25 +51,6 @@ class NER_BERT(object):
 
     """Abstract class that other NER plugins should implement"""
     def __init__(self):
-        # print("I AM IN BERT!")
-        # print("Loading model") 
-        # state_dict = torch.load("Models_intermediate/BERT_epoch-4.pt")
-        # print("Loaded model")
-        # self.model = BertForTokenClassification.from_pretrained(
-        #     "bert-base-cased",
-        #     state_dict = state_dict,
-        #     num_labels=len(NER_BERT.tag2idx),
-        #     output_attentions = False,
-        #     output_hidden_states = True
-        # )
-        # print("Created model!")
-
-        # self.model = BertForTokenClassification.from_pretrained(
-        #     "bert-base-cased",
-        #     num_labels=len(NER_BERT.tag2idx),
-        #     output_attentions = False,
-        #     output_hidden_states = True
-        # )      
 
         #config = AutoConfig.from_pretrained('ArishkaBelovishka/bert-i2b2')
         #self.model = AutoModelForTokenClassification.from_pretrained('ArishkaBelovishka/bert-i2b2', config = config)
@@ -69,26 +58,26 @@ class NER_BERT(object):
         # Uncomment the following if you want to load your fine-tuned model from Models folder.
         # If you just want to run NER use hugging-face repository where fine-tuned on half of i2b2 data model lives.
 
-        if os.path.exists("Models/NER_BERT.pt"):
-            print("Loading model") 
-            state_dict = torch.load("Models/NER_BERT.pt", map_location=torch.device('cpu'))
+        if os.path.exists("Models/BERT_epoch-10.pt"):
+            print("Loading model")
+            state_dict = torch.load("Models/BERT_epoch-10.pt", map_location=torch.device('cuda'))
             print("Loaded model")
 
             self.model = BertForTokenClassification.from_pretrained(
                 "bert-base-cased",
                 state_dict = state_dict,
                 num_labels=len(NER_BERT.tag2idx),
-                output_attentions = False,
+                output_attentions = True,
                 output_hidden_states = True
             )
         else:
             self.model = BertForTokenClassification.from_pretrained(
                 "bert-base-cased",
                 num_labels=len(NER_BERT.tag2idx),
-                output_attentions = False,
+                output_attentions = True,
                 output_hidden_states = True
-            )            
-        
+            )
+
 
     def perform_NER(self,text):
         """Implementation of the method that should perform named entity recognition"""
@@ -99,6 +88,7 @@ class NER_BERT(object):
         list_of_tuples_by_sent = []
 
         for sent in list_of_sents:
+            # , truncation=True
             tokenized_sentence = self.tokenizer.encode(sent, truncation=True) # BERT tokenizer is clever, it will internally divide the sentence by words, so all we need to provide there is sentence and it will return an array where each token is either special token/word/subword, refer to BERT WordPiece tokenizer approach
             # truncation=True to comply with 512 length of the sentence
             input_ids = torch.tensor([tokenized_sentence])
@@ -120,6 +110,7 @@ class NER_BERT(object):
             for token, label in zip(new_tokens, new_labels):
                 list_of_tuples.append((token, label))
                 #print("{}\t{}".format(label, token))
+
             list_of_tuples_by_sent.append(list_of_tuples)
 
         # remove [CLS] and [SEP] tokens to comply wth xml structure
@@ -127,11 +118,11 @@ class NER_BERT(object):
             for tag in self.tag_values:
                 if ('[CLS]', tag) in list_of_tuples_by_sent[i]:
                     list_of_tuples_by_sent[i].remove(('[CLS]', tag))
-            
-                if ('[SEP]', tag) in list_of_tuples_by_sent[i]:    
-                    list_of_tuples_by_sent[i].remove(('[SEP]', tag))            
-                    
-        return list_of_tuples_by_sent              
+
+                if ('[SEP]', tag) in list_of_tuples_by_sent[i]:
+                    list_of_tuples_by_sent[i].remove(('[SEP]', tag))
+
+        return list_of_tuples_by_sent
 
     # Needed for transform_sequences
     def tokenize_and_preserve_labels(self, sentence, text_labels):
@@ -163,13 +154,50 @@ class NER_BERT(object):
             tokenized_sentences.append(a)
             labels.append(b)
 
-        input_ids = pad_sequences([NER_BERT.tokenizer.convert_tokens_to_ids(txt) for txt in tokenized_sentences],
+        # Now need to split long tokenized sequences into subsequences of length less than 512 tokens
+        # not to loose valuable information in NER, basically not to cut sentences
+        # i2b2 docs are very ugly and sentences in them are usually way too long as doctors forget to put full stops...
+        # tokenized_sentences AND labels are the same strucutre of 2d arrays
+
+        # I need to take care of the issue if I am going to split beginning of the word and its end, like
+        # Arina is tokenized as "Ari" and "##na", thus I cannot separate the two, otherwise it will not make sense
+
+        distributed_tokenized_sentences, distributed_labels = [], []
+        for sent, label in zip(tokenized_sentences, labels):
+            if len(sent) > NER_BERT.MAX_LEN:
+                while len(sent) > NER_BERT.MAX_LEN:
+                    #print("I am in while loop to truncate sequence")
+                    index = NER_BERT.MAX_LEN - 2
+                    for i in range(NER_BERT.MAX_LEN - 2, 0, -1):
+                        if sent[i][:2] == "##":
+                            index = index - 1
+                        else:
+                            break
+
+                    new_sent = sent[:index] # 511 because we want to append [SEP] token in the end
+                    new_label = label[:index]
+
+                    sent = sent[index:]  # update given sent
+                    label = label[index:]
+
+                    distributed_tokenized_sentences.append(new_sent)
+                    distributed_labels.append(new_label)
+
+                distributed_tokenized_sentences.append(sent)
+                distributed_labels.append(label)
+                #print(sent)
+
+            else:
+                distributed_tokenized_sentences.append(sent)
+                distributed_labels.append(label)
+
+        input_ids = pad_sequences([NER_BERT.tokenizer.convert_tokens_to_ids(txt) for txt in distributed_tokenized_sentences],
                                 maxlen=NER_BERT.MAX_LEN, dtype="long", value=0.0,
                                 truncating="post", padding="post")
 
-        tags = pad_sequences([[NER_BERT.tag2idx.get(l) for l in lab] for lab in labels],
+        tags = pad_sequences([[NER_BERT.tag2idx.get(l) for l in lab] for lab in distributed_labels],
                             maxlen=NER_BERT.MAX_LEN, value=NER_BERT.tag2idx["PAD"], padding="post",
-                            dtype="long", truncating="post")  
+                            dtype="long", truncating="post")
 
         # Result is pair X (array of sentences, where each sentence is an array of words) and Y (array of labels)
         return input_ids, tags
@@ -178,14 +206,14 @@ class NER_BERT(object):
         """Function that actually train the algorithm"""
         # if torch.cuda.is_available():
         #     self.model.cuda()
-        
+
         tr_masks = [[float(i != 0.0) for i in ii] for ii in X_train]
 
         print("READY TO CREATE SOME TENZORS!!!!!!!!!!!!!!!!!!!!!!!!!!")
         tr_inputs = torch.tensor(X_train).type(torch.long)
         tr_tags = torch.tensor(Y_train).type(torch.long)
         tr_masks = torch.tensor(tr_masks).type(torch.long)
-   
+
         train_data = TensorDataset(tr_inputs, tr_masks, tr_tags)
         train_sampler = RandomSampler(train_data)
         train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=NER_BERT.bs)
@@ -224,6 +252,9 @@ class NER_BERT(object):
         total_steps = len(train_dataloader) * epochs
 
         # Create the learning rate scheduler.
+        # We need it to adjust learning rate if the accuracy does not change between epochs much,
+        # basically pushing the model to learn.
+        # https://sajjjadayobi.github.io/blog/markdown/2021/05/23/adamw-warmup.html
         scheduler = get_linear_schedule_with_warmup(
             optimizer,
             num_warmup_steps=0,
@@ -234,19 +265,19 @@ class NER_BERT(object):
         ## Store the average loss after each epoch so we can plot them.
         loss_values, validation_loss_values = [], []
 
-        # just for intermediate model save naming 
+        # just for intermediate model save naming
         epoch_num = 3
 
         for _ in trange(epochs, desc="Epoch"):
             # ========================================
             #               Training
             # ========================================
-            # Perform one full pass over the training set.        
+            # Perform one full pass over the training set.
             # clean the cache not to fail with video memory
             # if torch.cuda.is_available():
             #     torch.cuda.empty_cache()
 
-            # just for intermediate model save naming 
+            # just for intermediate model save naming
             epoch_num += 1
 
             # Put the model into training mode.
@@ -295,8 +326,8 @@ class NER_BERT(object):
 
 
 
-            # Save intermediate weights of the model, i.e. if computer goes crazy and drops the training or you 
-            # want to test the performance from different epochs 
+            # Save intermediate weights of the model, i.e. if computer goes crazy and drops the training or you
+            # want to test the performance from different epochs
             torch.save(self.model.state_dict(), os.path.join("Models_intermediate/", 'BERT_epoch-{}.pt'.format(epoch_num)))
 
                 #Plot the learning curve.
@@ -311,6 +342,8 @@ class NER_BERT(object):
         plt.show()
 
     def evaluate(self, X_test,Y_test):
+        if torch.cuda.is_available():
+            self.model.cuda()
         """Function to evaluate algorithm"""
         val_masks = [[float(i != 0.0) for i in ii] for ii in X_test]
         val_inputs = torch.tensor(X_test).type(torch.long)
@@ -320,6 +353,12 @@ class NER_BERT(object):
         valid_data = TensorDataset(val_inputs, val_masks, val_tags)
         valid_sampler = SequentialSampler(valid_data)
         valid_dataloader = DataLoader(valid_data, sampler=valid_sampler, batch_size=NER_BERT.bs)
+        # seed
+        # for _ in range(2):
+        #valid_dataloader = DataLoader(valid_data, shuffle=True, batch_size=NER_BERT.bs)
+
+        # for one random seed of valid_dataloader:
+        # ...
 
         # ========================================
         #               Validation
@@ -357,14 +396,44 @@ class NER_BERT(object):
         print("Validation loss: {}".format(eval_loss))
         pred_tags = [NER_BERT.tag_values[p_i] for p, l in zip(predictions, true_labels)
                                     for p_i, l_i in zip(p, l) if NER_BERT.tag_values[l_i] != "PAD"]
+
+        ###############################################################################
+        # reconstruct given text for purposes of algorithms' performance comparison
+        # our X_test is again a list of sentences, i.e. 2d array
+        tokens = [self.tokenizer.convert_ids_to_tokens(sent) for sent in X_test]
+        # Unpack tokens into 1d array to be able to go through it with labels
+        # [PAD] and not just PAD because that is what BERT actually puts
+        tokens_flat = [item for sublist in tokens for item in sublist if item != "[PAD]"]
+
+        #for sentence in tokens:
+        new_tokens, new_labels = [], []
+        for token, pred in zip(tokens_flat, pred_tags):
+            #print("{}\t{}".format(token, pred))
+            if token.startswith("##"):
+                new_tokens[-1] = new_tokens[-1] + token[2:]
+            else:
+                new_labels.append(pred)
+                new_tokens.append(token)
+        ###############################################################################
+
         valid_tags = [NER_BERT.tag_values[l_i] for l in true_labels
                                     for l_i in l if NER_BERT.tag_values[l_i] != "PAD"]
-        print("Validation Accuracy: {}".format(accuracy_score(pred_tags, valid_tags)))
-        print("Validation F1-Score: {}".format(f1_score(valid_tags, pred_tags, average='weighted')))
+
+        print("Validation Accuracy: {}".format(accuracy_score(valid_tags, pred_tags)))  # was other way around, why?
+        print("Validation F1-Score: {}".format(f1_score(valid_tags, pred_tags, average='weighted'))) # correct
+        print("Validation precision: {}".format(precision_score(valid_tags, pred_tags, average='weighted')))
+        print("Validation recall: {}".format(recall_score(valid_tags, pred_tags, average='weighted')))
         labels = ["ID", "PHI", "NAME", "CONTACT", "DATE", "AGE",
-                  "PROFESSION", "LOCATION"]
+                "PROFESSION", "LOCATION"]
         print(classification_report(valid_tags, pred_tags, digits=4, labels=labels))
         print()
+
+        ###############################################################################
+
+        # to evaluate union/intersection of algorithms
+        # for t, l in zip(new_tokens, new_labels):
+        #     print("{}\t{}".format(t, l))
+        return new_labels
 
         # # Use plot styling from seaborn.
         # sns.set(style='darkgrid')

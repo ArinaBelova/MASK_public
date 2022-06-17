@@ -1,21 +1,68 @@
 <project>
     <project_name>Masking v1</project_name>
     <project_start_date>30/05/2019</project_start_date>
-    <project_owner>Nikola Milosevic</project_owner>
-    <project_owner_contact>nikola.milosevic@manchester.ac.uk</project_owner_contact>
+    <project_owner>Arina Belova</project_owner>
+    <project_owner_contact>arina.belova@student.manchester.ac.uk</project_owner_contact>
     <algorithms>
         <entity>
             <entity_name>NAME</entity_name>
             <original_name>NAME</original_name>
-            <algorithm>NER_CRF</algorithm>
-            <masking_type>Redact</masking_type>
+            <algorithm>
+                <algorithm1>NER_BERT</algorithm1>
+                <algorithm2>NER_CRF_dictionaries</algorithm2>
+            </algorithm>
+            <!-- Resolution is either intersection of results (both algorithms predicts that tag) or union (one of algorithms predict the result and we take union of all those results)-->
+            <resolution>union</resolution>
+            <masking_type>Mask</masking_type>
+            <masking_class>mask_name_simple</masking_class>
+        </entity>
+
+        <entity>
+            <entity_name>LOCATION</entity_name>
+            <original_name>LOCATION</original_name>
+            <algorithm>NER_BERT</algorithm>
+            <masking_type>Mask</masking_type>
+            <masking_class>mask_location_simple</masking_class>
         </entity>
         <entity>
             <entity_name>DATE</entity_name>
             <original_name>DATE</original_name>
-            <algorithm>NER_CRF</algorithm>
+            <algorithm>NER_BERT</algorithm>
             <masking_type>Mask</masking_type>
             <masking_class>Mask_date_simple</masking_class>
+        </entity>
+        <entity>
+            <entity_name>ID</entity_name>
+            <original_name>ID</original_name>
+            <algorithm>NER_BERT</algorithm>
+            <masking_type>Mask</masking_type>
+            <masking_class>mask_id_simple</masking_class>
+        </entity>
+        <entity>
+            <entity_name>AGE</entity_name>
+            <original_name>AGE</original_name>
+            <algorithm>NER_BERT</algorithm>
+            <masking_type>Mask</masking_type>
+            <masking_class>mask_age_simple</masking_class>
+        </entity>
+        <entity>
+            <entity_name>CONTACT</entity_name>
+            <original_name>CONTACT</original_name>
+            <algorithm>NER_BERT</algorithm>
+            <masking_type>Mask</masking_type>
+            <masking_class>mask_contact_simple</masking_class>
+        </entity>
+        <entity>
+            <entity_name>PROFESSION</entity_name>
+            <original_name>PROFESSION</original_name>
+            <algorithm>
+                <algorithm1>NER_BERT</algorithm1>
+                <algorithm2>NER_CRF_dictionaries</algorithm2>
+            </algorithm>
+            <!-- Resolution is either intersection of results (both algorithms predicts that tag) or union (one of algorithms predict the result and we take union of all those results)-->
+            <resolution>union</resolution>
+            <masking_type>Mask</masking_type>
+            <masking_class>mask_job_randomized</masking_class>
         </entity>
     </algorithms>
     <dataset>

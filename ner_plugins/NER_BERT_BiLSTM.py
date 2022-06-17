@@ -1,5 +1,5 @@
 from transformers import BertModel, BertTokenizer, AdamW
-import torch 
+import torch
 import os
 from keras.preprocessing.sequence import pad_sequences
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
@@ -24,17 +24,18 @@ class BERT_BiLSTM(torch.nn.Module):
         """
         super(BERT_BiLSTM, self).__init__()
         # hidden size of BERT, hidden size of our classifier, and number of labels
-        D_in, H, D_out = 768, 256, 10 
+        D_in, H, D_out = 768, 256, 10
 
         self.embedding = BertModel.from_pretrained(
             "bert-base-cased",
             num_labels=10,
             output_attentions = False,
             output_hidden_states = True
-        )         
+        )
+
         # In this model we only train BiLSTM embedding and linear classifier, BERT embedding stands frozen
         for param in self.embedding.parameters():
-          param.requires_grad = False    
+          param.requires_grad = False
 
         self.lstm = torch.nn.LSTM(input_size=D_in, hidden_size=H, batch_first=True, bidirectional=True)
 
@@ -48,14 +49,14 @@ class BERT_BiLSTM(torch.nn.Module):
       print(f"DIMENSION OF EMISSIONS AFTER BILSTM IS {emission.size()}")
       logits = self.linear(emission)
       print(f"DIMENSION OF EMISSIONS AFTER LINEAR IS {logits.size()}")
-      
+
       #emission = self.softmax(emission)
       # print(f"LEN OF SEQUENCE_OUTPUT IS {sequence_output.size()}") # torch.Size([256, 400, 100])
       # print(sequence_output.select(2, -1).size())
       # print(sequence_output[:,:,-1].size())
       #linear_output = self.classifier['linear'](sequence_output)# torch.Size([256, 400, 1]) sequence_output[:, -1]
       # sequence_output.select(2, -1)
-    
+
       loss = None
       if labels is not None:
           loss_fct = torch.nn.CrossEntropyLoss()
@@ -71,9 +72,9 @@ class BERT_BiLSTM(torch.nn.Module):
               loss = loss_fct(logits.view(-1, 10), labels.view(-1))
 
       #print(f"LOSS IS {loss}")
-      #print(f"LOGITS ARE {logits}")        
+      #print(f"LOGITS ARE {logits}")
 
-      return (loss, logits)  
+      return (loss, logits)
 
 class NER_BERT_BiLSTM():
   #torch.set_printoptions(profile="full") # TODO: REMOVE THIS SHIT BEFORE PUSH
@@ -88,11 +89,21 @@ class NER_BERT_BiLSTM():
   def __init__(self):
     self.model = BERT_BiLSTM()
 
-    if os.path.exists("Models/NER_BERT_BiLSTM.pt"):
-      print("Loading model") 
-      self.model.load_state_dict(torch.load("Models/NER_BERT_BiLSTM.pt", map_location=torch.device('cpu')))
+    # final model is Models/NER_BERT_BiLSTM.pt
+    if os.path.exists("gModels/NER_BERT_BiLSTM.pt"):
+      print("Loading model")
+      self.model.load_state_dict(torch.load("gModels/NER_BERT_BiLSTM.pt", map_location=torch.device('cpu')))
       print("Loaded model")
 
+    # ref_model = BertModel.from_pretrained(
+    #         "bert-base-cased",
+    #         num_labels=10,
+    #         output_attentions = False,
+    #         output_hidden_states = True
+    #     )
+
+      # for p, p_ref in zip(self.model.embedding.parameters(), ref_model.parameters()):
+      #   print(torch.eq(p.data, p_ref.data))
 
     self.tokenizer = BertTokenizer.from_pretrained('bert-base-cased', num_labels=len(NER_BERT_BiLSTM.tag2idx), do_lower_case=False)
 
@@ -131,14 +142,50 @@ class NER_BERT_BiLSTM():
         tokenized_sentences.append(a)
         labels.append(b)
 
-    # padding sentences to length 400, sentences are in the big list of all the sentences
-    input_ids = pad_sequences([self.tokenizer.convert_tokens_to_ids(txt) for txt in tokenized_sentences],
+    # Now need to split long tokenized sequences into subsequences of length less than 512 tokens
+    # not to loose valuable information in NER, basically not to cut sentences
+    # i2b2 docs are very ugly and sentences in them are usually way too long as doctors forgot to put full stops...
+    # tokenized_sentences AND labels are the same strucutre of 2d arrays
+
+    # I need to take care of the issue if I am going to split beginning of the word and its end, like
+    # Arina is tokenized as "Ari" and "##na", thus I cannot separate the two, otherwise it will not make sense
+
+    distributed_tokenized_sentences, distributed_labels = [], []
+    for sent, label in zip(tokenized_sentences, labels):
+        if len(sent) > NER_BERT_BiLSTM.MAX_LEN:
+            while len(sent) > NER_BERT_BiLSTM.MAX_LEN:
+                #print("I am in while loop")
+                index = NER_BERT_BiLSTM.MAX_LEN - 2
+                for i in range(NER_BERT_BiLSTM.MAX_LEN - 2, 0, -1):
+                    if sent[i][:2] == "##":
+                        index = index - 1
+                    else:
+                        break
+
+                new_sent = sent[:index] # 511 because we want to append [SEP] token in the end
+                new_label = label[:index]
+
+                sent = sent[index:]  # update given sent
+                label = label[index:]
+
+                distributed_tokenized_sentences.append(new_sent)
+                distributed_labels.append(new_label)
+
+            distributed_tokenized_sentences.append(sent)
+            distributed_labels.append(label)
+            #print(sent)
+
+        else:
+            distributed_tokenized_sentences.append(sent)
+            distributed_labels.append(label)
+
+    input_ids = pad_sequences([self.tokenizer.convert_tokens_to_ids(txt) for txt in distributed_tokenized_sentences],
                             maxlen=NER_BERT_BiLSTM.MAX_LEN, dtype="long", value=0.0,
                             truncating="post", padding="post")
 
-    tags = pad_sequences([[NER_BERT_BiLSTM.tag2idx.get(l) for l in lab] for lab in labels],
+    tags = pad_sequences([[NER_BERT_BiLSTM.tag2idx.get(l) for l in lab] for lab in distributed_labels],
                         maxlen=NER_BERT_BiLSTM.MAX_LEN, value=NER_BERT_BiLSTM.tag2idx["PAD"], padding="post",
-                        dtype="long", truncating="post")  
+                        dtype="long", truncating="post")
 
     # Result is pair X (array of sentences, where each sentence is an array of words) and Y (array of labels)
     return input_ids, tags
@@ -148,6 +195,9 @@ class NER_BERT_BiLSTM():
       """Implementation of the method that should perform named entity recognition"""
       # tokenizer to divide data into sentences (thanks, nltk)
 
+      print("THE MODEL!!!!!!!!!!!!!!!!!")
+      print(self.model)
+
       list_of_sents = sent_tokenize(text)
 
       list_of_tuples_by_sent = []
@@ -155,12 +205,8 @@ class NER_BERT_BiLSTM():
       self.model.eval()
 
       for sent in list_of_sents:
-          print(sent)
-          
           tokenized_sentence = self.tokenizer.encode(sent, truncation=True)
 
-          print(tokenized_sentence)
-          
           input_ids = torch.tensor([tokenized_sentence])
 
           with torch.no_grad():
@@ -168,21 +214,16 @@ class NER_BERT_BiLSTM():
               output = self.model(input_ids)
 
           logits = output[1].detach().cpu().numpy()
-          
+
           # Now get the max index position for each array, where each array is a token/word.
           #print(len(logits[0])) # 39 tokens in a sentence, 39 arrays with logits for 10 classes, choose the max among them for each token
-          print(np.argmax(logits, axis=1))
-          #label_indices = ([p for p in np.argmax(logits, axis=1)])
+
           label_indices = []
           for p in logits:
             label_indices = np.argmax(p, axis=1)
 
-
-          #label_indices = np.argmax(np.asarray(output[1]))
-          print("LABEL INDICES!!!!!!!!!!!!!!!!!!!")
-          print(len(label_indices))
           tokens = self.tokenizer.convert_ids_to_tokens(input_ids.to('cpu').numpy()[0])
-     
+
           new_tokens, new_labels = [], []
           for token, label_idx in zip(tokens, label_indices):
               if token.startswith("##"):
@@ -202,17 +243,20 @@ class NER_BERT_BiLSTM():
           for tag in self.tag_values:
               if ('[CLS]', tag) in list_of_tuples_by_sent[i]:
                   list_of_tuples_by_sent[i].remove(('[CLS]', tag))
-          
-              if ('[SEP]', tag) in list_of_tuples_by_sent[i]:    
-                  list_of_tuples_by_sent[i].remove(('[SEP]', tag))            
-                  
-      return list_of_tuples_by_sent           
+
+              if ('[SEP]', tag) in list_of_tuples_by_sent[i]:
+                  list_of_tuples_by_sent[i].remove(('[SEP]', tag))
+
+              if ('[UNK]', tag) in list_of_tuples_by_sent[i]:
+                  list_of_tuples_by_sent[i].remove(('[UNK]', tag))
+
+      return list_of_tuples_by_sent
 
   def learn(self, X_train,Y_train, epochs=1):
     """Function that actually train the algorithm"""
-    # if torch.cuda.is_available():
-    #     self.model.cuda()
-    
+    if torch.cuda.is_available():
+        self.model.cuda()
+
     tr_masks = [[float(i != 0.0) for i in ii] for ii in X_train]
 
     print("READY TO CREATE SOME TENZORS!!!!!!!!!!!!!!!!!!!!!!!!!!")
@@ -228,7 +272,7 @@ class NER_BERT_BiLSTM():
 
     # #bilstm = nn.LSTM() # try to change the classification head (last layer) to BiLSTM?
 
-    # #model.classifier = 
+    # #model.classifier =
 
     FULL_FINETUNING = True
     if FULL_FINETUNING:
@@ -300,12 +344,12 @@ class NER_BERT_BiLSTM():
             # b_input_ids.to(NER_BERT_BiLSTM.device)
             # b_input_mask = torch.tensor([[1,1,1]]).type(torch.long)
             # b_input_mask.to(NER_BERT_BiLSTM.device)
-            
-            
+
+
             # outputs = self.model.bert(b_input_ids,
             #                  attention_mask=b_input_mask, return_dict=True)
-        
-            
+
+
             # print("IDS!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             # print(b_input_ids)
             # print("MASKS")
@@ -316,9 +360,9 @@ class NER_BERT_BiLSTM():
             #Previous outputs of disilbert + linear classification
             outputs = self.model(b_input_ids,
                             attention_mask=b_input_mask, labels=b_labels)
-           
-            #print(outputs)                            
-            
+
+            #print(outputs)
+
             #get the loss
             loss = outputs[0]
 
@@ -341,10 +385,10 @@ class NER_BERT_BiLSTM():
         # Store the loss value for plotting the learning curve.
         loss_values.append(avg_train_loss)
 
-        # Save intermediate weights of the model, i.e. if computer goes crazy and drops the training or you 
-        # want to test the performance from different epochs 
-        torch.save(self.model.state_dict(), os.path.join("Models_intermediate/", 'BERT_BiLSTM_epoch-{}.pt'.format(epoch_num)))
-    
+        # Save intermediate weights of the model, i.e. if computer goes crazy and drops the training or you
+        # want to test the performance from different epochs
+        torch.save(self.model.state_dict(), os.path.join("Models_intermediate/", 'BERT_BiLSTM_epoch-4.pt'.format(epoch_num)))
+
     # Plot the post-epoch-training learning curve.
     plt.figure()
     plt.plot(loss_values, 'b-o', label="training loss")
@@ -357,6 +401,8 @@ class NER_BERT_BiLSTM():
     plt.show()
 
   def evaluate(self, X_test,Y_test):
+    if torch.cuda.is_available():
+        self.model.cuda()
     """Function to evaluate algorithm"""
     val_masks = [[float(i != 0.0) for i in ii] for ii in X_test]
     val_inputs = torch.tensor(X_test).type(torch.long)
@@ -403,6 +449,26 @@ class NER_BERT_BiLSTM():
     print("Validation loss: {}".format(eval_loss))
     pred_tags = [NER_BERT_BiLSTM.tag_values[p_i] for p, l in zip(predictions, true_labels)
                                 for p_i, l_i in zip(p, l) if NER_BERT_BiLSTM.tag_values[l_i] != "PAD"]
+
+    ###############################################################################
+    # reconstruct given text for purposes of algorithms' performance comparison
+    # our X_test is again a list of sentences, i.e. 2d array
+    tokens = [self.tokenizer.convert_ids_to_tokens(sent) for sent in X_test]
+    # Unpack tokens into 1d array to be able to go through it with labels
+    # [PAD] and not just PAD because that is what BERT actually puts
+    tokens_flat = [item for sublist in tokens for item in sublist if item != "[PAD]"]
+
+    #for sentence in tokens:
+    new_tokens, new_labels = [], []
+    for token, pred in zip(tokens_flat, pred_tags):
+        #print("{}\t{}".format(token, pred))
+        if token.startswith("##"):
+            new_tokens[-1] = new_tokens[-1] + token[2:]
+        else:
+            new_labels.append(pred)
+            new_tokens.append(token)
+    ###############################################################################
+
     valid_tags = [NER_BERT_BiLSTM.tag_values[l_i] for l in true_labels
                                 for l_i in l if NER_BERT_BiLSTM.tag_values[l_i] != "PAD"]
     print("Validation Accuracy: {}".format(accuracy_score(pred_tags, valid_tags)))
@@ -412,6 +478,9 @@ class NER_BERT_BiLSTM():
     print(classification_report(valid_tags, pred_tags, digits=4, labels=labels))
     print()
 
+    # to evaluate union/intersection of algorithms
+    return new_labels
+
 
   def save(self, model_path):
     """
@@ -420,4 +489,4 @@ class NER_BERT_BiLSTM():
     :return: Doesn't return anything
     """
     torch.save(self.model.state_dict(), "Models/"+model_path+".pt")
-    print("Saved model to disk")          
+    print("Saved model to disk")

@@ -19,7 +19,6 @@ import os
 from itertools import chain
 
 import pycrfsuite
-import sklearn_crfsuite
 import pickle
 from nltk.tokenize.treebank import TreebankWordTokenizer
 from sklearn.preprocessing import LabelBinarizer
@@ -402,11 +401,40 @@ class NER_CRF_dictionaries_pycrfsuite(NER_abstract):
                 sentence.append(seq[i][0])
             X_test.append(features_seq)
             word_sequences.append(sentence)
-        y_pred = self.crf_model.predict(X_test)
-        final_sequences = []
-        for i in range(0,len(y_pred)):
+        y_pred = self.crf_model.tag(X_test)
+
+        
+        import re
+
+        final_sequences, fin_tokenized_sentence, fin_labels = [], []
+
+        for word_sequence, label in zip(word_sequences, y_pred):
+            tokenized_sentence = []
+            labels = []
+            for word, l in zip(word_sequence, label):
+                # Tokenize the word and count # of subwords the word is broken into
+                tokenized_word = re.split("([\W | _])", word) # the most fucking clever regexpr in my life
+                tokenized_word = [t  for t in tokenized_word if t != ""]
+                n_subwords = len(tokenized_word)
+                # Add the tokenized word to the final tokenized word list
+                tokenized_sentence.extend(tokenized_word)
+                # Add the same label to the new list of labels `n_subwords` times
+                labels.extend([l] * n_subwords)
+            fin_tokenized_sentence.append(tokenized_sentence)
+            fin_labels.append(labels)
+
+        for i in range(0,len(fin_labels)):
             sentence = []
-            for j in range(0,len(y_pred[i])):
-                sentence.append((word_sequences[i][j],y_pred[i][j]))
+            for j in range(0,len(fin_labels[i])):
+                sentence.append((fin_tokenized_sentence[i][j],fin_labels[i][j]))
+
             final_sequences.append(sentence)
+
+
+        # final_sequences = []
+        # for i in range(0,len(y_pred)):
+        #     sentence = []
+        #     for j in range(0,len(y_pred[i])):
+        #         sentence.append((word_sequences[i][j],y_pred[i][j]))
+        #     final_sequences.append(sentence)
         return final_sequences

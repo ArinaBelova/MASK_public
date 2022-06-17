@@ -6,7 +6,7 @@ nltk.download('punkt')
 import torch
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
 
-import torch.nn as nn 
+import torch.nn as nn
 
 from transformers import DistilBertTokenizer, DistilBertForTokenClassification, DistilBertConfig, AdamW
 from transformers import get_linear_schedule_with_warmup
@@ -15,7 +15,7 @@ from keras.preprocessing.sequence import pad_sequences
 from sklearn.model_selection import train_test_split
 
 from seqeval.metrics import accuracy_score
-from sklearn.metrics import f1_score, classification_report
+from sklearn.metrics import f1_score, classification_report, precision_score, recall_score
 
 
 from tqdm import trange
@@ -40,9 +40,9 @@ class NER_DistilBERT(object):
 
     """Abstract class that other NER plugins should implement"""
     def __init__(self):
-        if os.path.exists("Models/NER_DisitlBERT.pt"):
-            print("Loading model") 
-            state_dict = torch.load("Models/NER_DisitlBERT.pt", map_location=torch.device('cpu'))
+        if os.path.exists("gModels/NER_DisitlBERT.pt"):
+            print("Loading model")
+            state_dict = torch.load("gModels/NER_DisitlBERT.pt", map_location=torch.device('cpu'))
             print("Loaded model")
 
             print("Loaded weigits of fine-tuned model into the model.")
@@ -59,8 +59,8 @@ class NER_DistilBERT(object):
                 num_labels=len(NER_DistilBERT.tag2idx),
                 output_attentions = False,
                 output_hidden_states = True
-            )            
-        
+            )
+
 
     def perform_NER(self,text):
         """Implementation of the method that should perform named entity recognition"""
@@ -98,11 +98,11 @@ class NER_DistilBERT(object):
             for tag in self.tag_values:
                 if ('[CLS]', tag) in list_of_tuples_by_sent[i]:
                     list_of_tuples_by_sent[i].remove(('[CLS]', tag))
-            
-                if ('[SEP]', tag) in list_of_tuples_by_sent[i]:    
-                    list_of_tuples_by_sent[i].remove(('[SEP]', tag))            
 
-        return list_of_tuples_by_sent              
+                if ('[SEP]', tag) in list_of_tuples_by_sent[i]:
+                    list_of_tuples_by_sent[i].remove(('[SEP]', tag))
+
+        return list_of_tuples_by_sent
 
     # Needed for transform_sequences
     def tokenize_and_preserve_labels(self, sentence, text_labels):
@@ -136,13 +136,50 @@ class NER_DistilBERT(object):
             tokenized_sentences.append(a)
             labels.append(b)
 
-        input_ids = pad_sequences([NER_DistilBERT.tokenizer.convert_tokens_to_ids(txt) for txt in tokenized_sentences],
+        # Now need to split long tokenized sequences into subsequences of length less than 512 tokens
+        # not to loose valuable information in NER, basically not to cut sentences
+        # i2b2 docs are very ugly and sentences in them are usually way too long as doctors forgot to put full stops...
+        # tokenized_sentences AND labels are the same strucutre of 2d arrays
+
+        # I need to take care of the issue if I am going to split beginning of the word and its end, like
+        # Arina is tokenized as "Ari" and "##na", thus I cannot separate the two, otherwise it will not make sense
+
+        distributed_tokenized_sentences, distributed_labels = [], []
+        for sent, label in zip(tokenized_sentences, labels):
+            if len(sent) > NER_DistilBERT.MAX_LEN:
+                while len(sent) > NER_DistilBERT.MAX_LEN:
+                    print("I am in while loop")
+                    index = NER_DistilBERT.MAX_LEN - 2
+                    for i in range(NER_DistilBERT.MAX_LEN - 2, 0, -1):
+                        if sent[i][:2] == "##":
+                            index = index - 1
+                        else:
+                            break
+
+                    new_sent = sent[:index] # 511 because we want to append [SEP] token in the end
+                    new_label = label[:index]
+
+                    sent = sent[index:]  # update given sent
+                    label = label[index:]
+
+                    distributed_tokenized_sentences.append(new_sent)
+                    distributed_labels.append(new_label)
+
+                distributed_tokenized_sentences.append(sent)
+                distributed_labels.append(label)
+                #print(sent)
+
+            else:
+                distributed_tokenized_sentences.append(sent)
+                distributed_labels.append(label)
+
+        input_ids = pad_sequences([NER_DistilBERT.tokenizer.convert_tokens_to_ids(txt) for txt in distributed_tokenized_sentences],
                                 maxlen=NER_DistilBERT.MAX_LEN, dtype="long", value=0.0,
                                 truncating="post", padding="post")
 
-        tags = pad_sequences([[NER_DistilBERT.tag2idx.get(l) for l in lab] for lab in labels],
+        tags = pad_sequences([[NER_DistilBERT.tag2idx.get(l) for l in lab] for lab in distributed_labels],
                             maxlen=NER_DistilBERT.MAX_LEN, value=NER_DistilBERT.tag2idx["PAD"], padding="post",
-                            dtype="long", truncating="post")  
+                            dtype="long", truncating="post")
 
         # Result is pair X (array of sentences, where each sentence is an array of words) and Y (array of labels)
         return input_ids, tags
@@ -151,14 +188,14 @@ class NER_DistilBERT(object):
         """Function that actually train the algorithm"""
         # if torch.cuda.is_available():
         #     self.model.cuda()
-        
+
         tr_masks = [[float(i != 0.0) for i in ii] for ii in X_train]
 
         print("READY TO CREATE SOME TENZORS!!!!!!!!!!!!!!!!!!!!!!!!!!")
         tr_inputs = torch.tensor(X_train).type(torch.long)
         tr_tags = torch.tensor(Y_train).type(torch.long)
         tr_masks = torch.tensor(tr_masks).type(torch.long)
-   
+
         train_data = TensorDataset(tr_inputs, tr_masks, tr_tags)
         train_sampler = RandomSampler(train_data)
         train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=NER_DistilBERT.bs)
@@ -202,19 +239,19 @@ class NER_DistilBERT(object):
         ## Store the average loss after each epoch so we can plot them.
         loss_values, validation_loss_values = [], []
 
-        # just for intermediate model save naming 
+        # just for intermediate model save naming
         epoch_num = 0
 
         for _ in trange(epochs, desc="Epoch"):
             # ========================================
             #               Training
             # ========================================
-            # Perform one full pass over the training set.        
+            # Perform one full pass over the training set.
             # clean the cache not to fail with video memory
             # if torch.cuda.is_available():
             #     torch.cuda.empty_cache()
 
-            # just for intermediate model save naming 
+            # just for intermediate model save naming
             epoch_num += 1
 
             # Put the model into training mode.
@@ -263,8 +300,8 @@ class NER_DistilBERT(object):
 
 
 
-            # Save intermediate weights of the model, i.e. if computer goes crazy and drops the training or you 
-            # want to test the performance from different epochs 
+            # Save intermediate weights of the model, i.e. if computer goes crazy and drops the training or you
+            # want to test the performance from different epochs
             torch.save(self.model.state_dict(), os.path.join("Models_intermediate/", 'DisitlBERT_epoch-{}.pt'.format(epoch_num)))
 
                 #Plot the learning curve.
@@ -325,10 +362,33 @@ class NER_DistilBERT(object):
         print("Validation loss: {}".format(eval_loss))
         pred_tags = [NER_DistilBERT.tag_values[p_i] for p, l in zip(predictions, true_labels)
                                     for p_i, l_i in zip(p, l) if NER_DistilBERT.tag_values[l_i] != "PAD"]
+
+        ###############################################################################
+        # reconstruct given text for purposes of algorithms' performance comparison
+        # our X_test is again a list of sentences, i.e. 2d array
+        tokens = [self.tokenizer.convert_ids_to_tokens(sent) for sent in X_test]
+        # Unpack tokens into 1d array to be able to go through it with labels
+        # [PAD] and not just PAD because that is what BERT actually puts
+        tokens_flat = [item for sublist in tokens for item in sublist if item != "[PAD]"]
+
+        #for sentence in tokens:
+        new_tokens, new_labels = [], []
+        for token, pred in zip(tokens_flat, pred_tags):
+            #print("{}\t{}".format(token, pred))
+            if token.startswith("##"):
+                new_tokens[-1] = new_tokens[-1] + token[2:]
+            else:
+                new_labels.append(pred)
+                new_tokens.append(token)
+        ###############################################################################
+
         valid_tags = [NER_DistilBERT.tag_values[l_i] for l in true_labels
                                     for l_i in l if NER_DistilBERT.tag_values[l_i] != "PAD"]
-        print("Validation Accuracy: {}".format(accuracy_score(pred_tags, valid_tags)))
+        print("Validation Accuracy: {}".format(accuracy_score(valid_tags, pred_tags)))
         print("Validation F1-Score: {}".format(f1_score(valid_tags, pred_tags, average='weighted')))
+        #print("Validation F1-Score: {}".format(f1_score(valid_tags, pred_tags, average='weighted'))) # correct
+        print("Validation precision: {}".format(precision_score(valid_tags, pred_tags, average='weighted')))
+        print("Validation recall: {}".format(recall_score(valid_tags, pred_tags, average='weighted')))
         labels = ["ID", "PHI", "NAME", "CONTACT", "DATE", "AGE",
                   "PROFESSION", "LOCATION"]
         print(classification_report(valid_tags, pred_tags, digits=4, labels=labels))
@@ -352,6 +412,7 @@ class NER_DistilBERT(object):
         # plt.legend()
 
         # plt.show()
+        return new_labels
 
     def save(self, model_path):
         """
