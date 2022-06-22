@@ -15,7 +15,6 @@ limitations under the License.
 """
 
 #Code by Nikola Milosevic
-from msilib import sequence
 import os
 
 import sklearn_crfsuite
